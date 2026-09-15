@@ -1,0 +1,15 @@
+{
+  "name": "pos-thermal-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs on the office PC the printer is paired to. Separate from the web app: serialport is a native module and has no business in a serverless deploy.",
+  "scripts": {
+    "start": "node index.mjs",
+    "ports": "node index.mjs --list"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "serialport": "^13.0.0"
+  }
+}

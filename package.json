@@ -1,0 +1,38 @@
+{
+  "name": "pos-thermal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "check": "npm run typecheck && npm test",
+    "bitmap": "powershell -ExecutionPolicy Bypass -File phase0/make-bitmaps.ps1",
+    "print-test": "node phase0/print-test.mjs",
+    "test": "tsx --test lib/receipt.test.ts",
+    "typecheck": "tsc --noEmit",
+    "agent": "node agent/index.mjs",
+    "inline-bitmap": "node scripts/inline-bitmap.mjs",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "next": "16.3.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "pg": "^8.23.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5"
+  }
+}
