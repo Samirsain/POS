@@ -36,12 +36,14 @@ permitted divergence is the rupee sign, because the printer has no glyph for it
 
 ### 1. Supabase
 
-Create a project at supabase.com, then run `supabase/migrations/0001_init.sql`
-in the SQL editor. From **Settings → API** take the project URL and the
+Create a project at supabase.com, then apply every file in
+`supabase/migrations/` in order — paste them into the SQL editor, or set
+`DATABASE_URL` to the connection string and run `npm run db:migrate`. They are
+safe to re-run. From **Settings → API** take the project URL and the
 **service-role** key.
 
-If you are continuing an existing receipt book, change `start with 12` in the
-migration to your last used number before running it.
+If you are continuing an existing receipt book, run
+`select setval('receipt_no_seq', <last used number>);` afterwards.
 
 ### 2. Vercel
 
@@ -86,9 +88,10 @@ To start it automatically at login: Win+R → `shell:startup` → put a shortcut
 
 ## Daily use
 
-- **New Receipt** — pick a heading, pick its size, fill four fields, Print. The
-  receipt number is allocated by the database; expand the summary line to set
-  one manually.
+- **New Receipt** — four fields, live preview, Print. The receipt number is
+  allocated by the database (six digits: `000001`, `000002`, …), so two people
+  printing at the same moment cannot collide. Project, plot and name are forced
+  to capitals as you type.
 - **Queue** — every job with its status. `Retry` re-queues a failed job.
   `Reprint` makes a deliberate second copy and is logged as one.
 
@@ -123,9 +126,15 @@ Results go in `docs/printer-verification.md`.
   a device id on the job.
 - **Templates are code, not data.** Changing the wording is a deploy. Move them
   to a table when someone needs to change it without shipping.
+- **One layout, chosen in code.** `DEFAULT_TEMPLATE_ID` in `lib/receipt.ts`
+  picks it. The ॐ and श्री गणेशाय नमः headings still exist and the API still
+  accepts them; there is just no control for them at the counter.
 - **Headings are pre-rendered rasters.** ESC/POS cannot scale a bitmap, so each
-  heading is rendered at three fixed widths and the size control picks one.
-  Adding a size means editing the fractions in `phase0/make-bitmaps.ps1`.
+  is rendered at three fixed widths. Adding a size means editing the fractions
+  in `phase0/make-bitmaps.ps1`.
+- **The fixed 80mm height is unverified.** It relies on `ESC 3` (line spacing)
+  and `ESC J` (feed n dots), neither of which appears in the self-test. Measure
+  the first print with a ruler before trusting it.
 - **No auto-cut.** `GS V` is not in the self-test, so jobs end with `ESC d 4`
   and the paper is torn by hand.
 
@@ -151,8 +160,8 @@ To add a heading: drop a new `<name>@<width>.txt` in `phase0/assets`, run both
 commands, and add an entry to `TEMPLATES` in `lib/receipt.ts`.
 
 **The heading is nearly the whole receipt.** Everything else is under 300 bytes;
-the heading ranges from 712 to 4424. On Bluetooth that is the entire wait, which
-is why the size control shows the byte count next to it.
+the heading ranges from 712 to 4424. On Bluetooth that is the entire wait. The
+default layout uses a plain ASCII heading and so carries no raster at all.
 
 | | Small | Medium | Large |
 | --- | --- | --- | --- |
