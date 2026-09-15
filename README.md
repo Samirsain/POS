@@ -61,11 +61,15 @@ once per device.
 The printer must already be paired over Bluetooth (PIN `1234`, MAC
 `DC:0D:30:59:51:A9`) so Windows has given it an outgoing COM port.
 
+The agent has its own `package.json`. `serialport` is a native module and has
+no business in a serverless deploy, so the web app does not depend on it.
+
 ```
-copy agent\.env.example agent\.env      # then fill in the same Supabase values
+cd agent
+copy .env.example .env      # then fill in the same Supabase values
 npm install
-node agent\index.mjs --list             # marks which port is the printer
-npm run agent
+npm run ports               # marks which port is the printer
+npm start
 ```
 
 **The port is found by MAC, not by number.** This laptop has four Bluetooth SPP
@@ -78,7 +82,7 @@ work. Set `PRINTER_PORT` only to force a specific port.
 Leave it running. The site header shows `Agent: Online` within five seconds.
 
 To start it automatically at login: Win+R → `shell:startup` → put a shortcut to
-`npm run agent` there, with the project folder as **Start in**.
+`npm start` there, with the `agent` folder as **Start in**.
 
 ## Daily use
 
@@ -103,7 +107,7 @@ npm run check       # both
 ### Hardware work
 
 ```
-npm run print-test          # Phase 0: raw test print, no app involved
+npm run print-test          # Phase 0: raw test print, no app involved (needs agent deps)
 npm run bitmap              # re-render every phase0/assets/*.txt (-Threshold to tune weight)
 npm run inline-bitmap       # push the results into lib/
 ```
