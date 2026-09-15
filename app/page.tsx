@@ -18,6 +18,7 @@ import { useStatus } from "./agent-status";
 type Result =
   | { kind: "idle" }
   | { kind: "printing"; receiptNo: string }
+  | { kind: "queued"; receiptNo: string }
   | { kind: "done"; receiptNo: string }
   | { kind: "failed"; receiptNo: string | null; message: string };
 
@@ -90,6 +91,15 @@ export default function NewReceipt() {
         setResult({ kind: "done", receiptNo: body.receiptNo });
         setValues(Object.fromEntries(entryFields.map((f) => [f, ""])));
         sendToRawbt(body.payload);
+        return;
+      }
+
+      // Nothing is running on the office PC, so no one is going to claim this
+      // job. The receipt is saved and will print when the connector is back —
+      // say that now instead of spinning for 45 seconds first.
+      if (status && !status.agentOnline) {
+        setResult({ kind: "queued", receiptNo: body.receiptNo });
+        setValues(Object.fromEntries(entryFields.map((f) => [f, ""])));
         return;
       }
 
@@ -173,16 +183,42 @@ export default function NewReceipt() {
             </p>
           )}
 
-          {status && !status.printerConnected && !onAndroid && (
+          {/* Shown on the phone too. The office connector being down is exactly
+              what a phone cannot see, and the phone has a way round it. Nobody
+              home and printer-not-answering are different promises: only the
+              first one prints by itself later. */}
+          {status && !status.printerConnected && (
             <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Printer is not connected. You can still save the receipt — it prints as soon as the
-              agent comes back.
+              {!status.agentOnline ? (
+                <>
+                  The office printer is offline — the office PC is asleep, or the connector is not
+                  running on it.{" "}
+                  {onAndroid
+                    ? "Print on this phone still works. Anything sent to the office printer waits until it is back."
+                    : "You can still press Print: the receipt is saved and prints as soon as the connector is back."}
+                </>
+              ) : (
+                <>
+                  The connector is running but the printer is not answering
+                  {status.note ? ` — ${status.note}` : ""}. Check it is switched on, has paper, and
+                  is plugged in.{" "}
+                  {onAndroid
+                    ? "Print on this phone still works."
+                    : "Printing now will save the receipt and fail into the Queue, where you can retry it."}
+                </>
+              )}
             </p>
           )}
 
           {result.kind === "done" && (
             <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-900">
               Printed. Receipt no. {result.receiptNo}.
+            </p>
+          )}
+          {result.kind === "queued" && (
+            <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Receipt no. {result.receiptNo} saved and waiting. It prints as soon as the office
+              connector is back — see Queue.
             </p>
           )}
           {result.kind === "printing" && (
