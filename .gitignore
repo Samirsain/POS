@@ -51,3 +51,8 @@ agent/node_modules
 # design references, not part of the build
 image.png
 om.md
+
+# connector settings and log live next to the exe
+connector/connector.env
+connector/*.log
+dist/

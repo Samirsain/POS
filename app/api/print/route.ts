@@ -24,6 +24,13 @@ const bodySchema = z.object({
   receiptNo: z.string().trim().regex(/^\d{1,8}$/).optional(),
   templateId: z.enum(Object.keys(TEMPLATES) as [string, ...string[]]).default(DEFAULT_TEMPLATE_ID),
   headerSize: z.enum(HEADER_SIZES).default(DEFAULT_HEADER_SIZE),
+  /**
+   * Who prints it.
+   *   agent  - queued for the office connector (the default)
+   *   device - the phone prints it itself over Bluetooth; the bytes come back
+   *            in the response and no job is ever queued for the office
+   */
+  target: z.enum(["agent", "device"]).default("agent"),
   /** Client-generated, one per Print press. Rule 6. */
   idempotencyKey: z.string().uuid(),
 });
@@ -43,7 +50,7 @@ export async function POST(request: Request) {
   // the job that already exists. It must never create a second receipt.
   const { data: existing } = await supabase
     .from("print_jobs")
-    .select("id, receipt_id, receipts(receipt_no)")
+    .select("id, receipt_id, payload, target, receipts(receipt_no)")
     .eq("idempotency_key", input.idempotencyKey)
     .maybeSingle();
   if (existing) {
@@ -52,6 +59,9 @@ export async function POST(request: Request) {
       jobId: existing.id,
       receiptNo: receipt?.receipt_no ?? null,
       duplicate: true,
+      // Same bytes as the first time, so pressing Print twice on a phone
+      // reprints the same receipt rather than allocating a new number.
+      payload: existing.target === "device" ? existing.payload : undefined,
     });
   }
 
@@ -115,6 +125,11 @@ export async function POST(request: Request) {
       receipt_id: receipt.id,
       idempotency_key: input.idempotencyKey,
       payload: payload.toString("base64"),
+      target: input.target,
+      // A device job is already done by the time the phone hands the bytes to
+      // RawBT, and it must never sit in the queue where the office connector
+      // would print a second copy.
+      status: input.target === "device" ? "SUCCESS" : "PENDING",
     })
     .select("id")
     .single();
@@ -130,5 +145,7 @@ export async function POST(request: Request) {
     jobId: job.id,
     receiptNo: receipt.receipt_no,
     bytes: payload.length,
+    // Only the phone gets the bytes; the office connector fetches its own.
+    payload: input.target === "device" ? payload.toString("base64") : undefined,
   });
 }

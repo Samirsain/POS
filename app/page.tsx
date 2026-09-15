@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { isAndroid, sendToRawbt } from "./rawbt";
 import {
   DEFAULT_HEADER_SIZE,
   FIELD_META,
@@ -30,6 +31,14 @@ export default function NewReceipt() {
   );
   const [result, setResult] = useState<Result>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
+  // The server has no user agent to read, so it renders the desktop buttons and
+  // the client corrects them on hydration. useSyncExternalStore rather than an
+  // effect: this never changes after load, so there is nothing to subscribe to.
+  const onAndroid = useSyncExternalStore(
+    () => () => {},
+    () => isAndroid(),
+    () => false,
+  );
 
   const today = useMemo(() => new Date(), []);
   // The database allocates the real number; this is what it will be next, so
@@ -54,7 +63,7 @@ export default function NewReceipt() {
   const missing = entryFields.filter((f) => !values[f]?.trim());
   const canPrint = missing.length === 0 && Number(values.amount) > 0 && !busy;
 
-  async function print() {
+  async function print(target: "agent" | "device") {
     setBusy(true);
     setResult({ kind: "idle" });
     // One key per press. A double-click reuses it and the server returns the
@@ -66,11 +75,21 @@ export default function NewReceipt() {
         headers: { "content-type": "application/json" },
         // No receiptNo: the database sequence allocates it, which is the only
         // way two people printing at once cannot collide (§9).
-        body: JSON.stringify({ ...values, idempotencyKey }),
+        body: JSON.stringify({ ...values, target, idempotencyKey }),
       });
       const body = await res.json();
       if (!res.ok) {
         setResult({ kind: "failed", receiptNo: null, message: body.error ?? "Could not queue the receipt" });
+        return;
+      }
+
+      if (target === "device") {
+        // The bytes go to RawBT, which owns the Bluetooth connection. Nothing
+        // reports back afterwards — the person pressing the button is standing
+        // in front of the printer, so they can see it for themselves.
+        setResult({ kind: "done", receiptNo: body.receiptNo });
+        setValues(Object.fromEntries(entryFields.map((f) => [f, ""])));
+        sendToRawbt(body.payload);
         return;
       }
 
@@ -122,15 +141,39 @@ export default function NewReceipt() {
           })}
 
 
+          {/* On Android the phone can drive the printer itself, so that is the
+              primary button. Everywhere else the office connector is the only
+              route to this printer and there is nothing to choose between. */}
+          {onAndroid && (
+            <button
+              className="mt-2 rounded bg-neutral-900 px-4 py-3 text-base font-semibold text-white disabled:bg-neutral-300"
+              disabled={!canPrint}
+              onClick={() => print("device")}
+            >
+              {busy ? "Printing…" : "Print on this phone"}
+            </button>
+          )}
+
           <button
-            className="mt-2 rounded bg-neutral-900 px-4 py-3 text-base font-semibold text-white disabled:bg-neutral-300"
+            className={`rounded px-4 py-3 text-base font-semibold disabled:opacity-40 ${
+              onAndroid
+                ? "border border-neutral-400 bg-white text-neutral-900"
+                : "mt-2 bg-neutral-900 text-white disabled:bg-neutral-300"
+            }`}
             disabled={!canPrint}
-            onClick={print}
+            onClick={() => print("agent")}
           >
-            {busy ? "Printing…" : "Print"}
+            {busy ? "Printing…" : onAndroid ? "Print on the office printer" : "Print"}
           </button>
 
-          {status && !status.printerConnected && (
+          {onAndroid && (
+            <p className="text-xs text-neutral-500">
+              Pair the printer once in Android Bluetooth settings. Printing needs the free RawBT
+              app — the first print opens its Play Store page.
+            </p>
+          )}
+
+          {status && !status.printerConnected && !onAndroid && (
             <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
               Printer is not connected. You can still save the receipt — it prints as soon as the
               agent comes back.

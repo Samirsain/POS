@@ -2,10 +2,10 @@
 // Prints the receipt layout as raw ESC/POS and runs the Font B character test
 // (spec 1.3). Nothing in Phase 1+ gets built until this comes out of the printer.
 //
-//   node phase0/print-test.mjs [--port COM3] [--baud 9600] [--dry]
+//   node phase0/print-test.mjs [--port COM9] [--dry]
 
-import { SerialPort } from 'serialport';
-import { readFileSync } from 'node:fs';
+import { readFileSync, openSync, writeSync, fsyncSync, closeSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const arg = (name, fallback) => {
@@ -13,7 +13,6 @@ const arg = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1];
 };
 const DRY = process.argv.includes('--dry');
-const BAUD = Number(arg('baud', 9600));
 const COLS = 32;                       // Font A. Verified from self-test, not a datasheet.
 const here = (f) => fileURLToPath(new URL(f, import.meta.url));
 
@@ -154,19 +153,38 @@ const detailed = Buffer.concat([
 const payload = Buffer.concat([receipt, ganeshReceipt, detailed, fontTest]);
 
 // --- transport ------------------------------------------------------------
-const open = (path) => new Promise((resolve, reject) => {
-  const port = new SerialPort({ path, baudRate: BAUD }, (err) => err ? reject(err) : resolve(port));
-});
+// No serialport: on Windows a Bluetooth SPP port is just a file, and staying
+// dependency-free is what lets the connector ship without a Node install.
 
 // Find the printer by its MAC, not by a COM number. This laptop has other
 // Bluetooth SPP devices paired, and writing ESC/POS to one of those is worse
 // than printing nothing.
 const PRINTER_MAC = 'DC0D305951A9';
-const findByMac = async () => {
-  const ports = await SerialPort.list().catch(() => []);
-  return ports
-    .filter((p) => (p.pnpId ?? '').replace(/[^0-9a-f]/gi, '').toUpperCase().includes(PRINTER_MAC))
-    .map((p) => p.path);
+const findByMac = () => {
+  const ps =
+    'Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue | ' +
+    `Where-Object { ($_.InstanceId -replace '[^0-9A-Fa-f]','').ToUpper() -like '*${PRINTER_MAC}*' } | ` +
+    "ForEach-Object { if ($_.FriendlyName -match '\\((COM\\d+)\\)') { $Matches[1] } }";
+  try {
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+      encoding: 'utf8', timeout: 20000, windowsHide: true,
+    });
+    return out.trim().split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+const writeToPort = (port, bytes) => {
+  const fd = openSync(port, 'w');
+  try {
+    let sent = 0;
+    while (sent < bytes.length) sent += writeSync(fd, bytes, sent, bytes.length - sent);
+    fsyncSync(fd);          // or a close can drop bytes the printer never saw
+    return sent;
+  } finally {
+    closeSync(fd);
+  }
 };
 
 // --- one runnable check for the only non-trivial logic here ---------------
@@ -191,30 +209,26 @@ const main = async () => {
     return;
   }
 
-  const candidates = arg('port') ? [arg('port')] : await findByMac();
+  const candidates = arg('port') ? [arg('port')] : findByMac();
   if (!candidates.length) {
     throw new Error(
       `printer ${PRINTER_MAC} not found. Pair it over Bluetooth (PIN 1234), or pass --port COMn.`,
     );
   }
 
-  let port, used;
-  for (const path of candidates) {
-    try { port = await open(path); used = path; break; }
-    catch (e) { console.log(`${path}: ${e.message}`); }
-  }
-  if (!port) throw new Error(`no port opened. Tried ${candidates.join(', ')}. Pass --port COMn.`);
-  console.log(`open ${used} @ ${BAUD}`);
-
+  let used, lastError;
   const t0 = Date.now();
-  await new Promise((res, rej) => port.write(payload, (e) => e ? rej(e) : res()));
-  await new Promise((res, rej) => port.drain((e) => e ? rej(e) : res()));
+  for (const path of candidates) {
+    try { writeToPort(path, payload); used = path; break; }
+    catch (e) { lastError = e; console.log(`${path}: ${e.message}`); }
+  }
+  if (!used) throw new Error(`could not write to ${candidates.join(', ')} - ${lastError?.message}`);
   const ms = Date.now() - t0;
-  await new Promise((res) => port.close(res));
 
-  console.log(`sent in ${ms}ms (${Math.round(payload.length / (ms / 1000))} B/s)`);
-  console.log('NOTE: drain means "handed to the Bluetooth stack", not "printed".');
-  console.log('Time the paper by eye too, and record both in docs/printer-verification.md');
+  console.log(`sent ${payload.length} bytes to ${used} in ${ms}ms`);
+  console.log('NOTE: that is "handed to the Bluetooth stack", not "printed".');
+  console.log('Measure the paper with a ruler - each receipt should be 80mm -');
+  console.log('and record what you see in docs/printer-verification.md');
 };
 
 main().catch((e) => { console.error(String(e.message ?? e)); process.exit(1); });

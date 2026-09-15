@@ -11,20 +11,20 @@ verified hardware facts and the rules this code follows.
 ```
 Browser (anywhere)                Vercel                        Office PC
 ──────────────────                ──────                        ─────────
-form + live preview  ──POST──▶  Next.js server                 print agent
+form + live preview  ──POST──▶  Next.js server                 connector
                                  · allocates receipt no.         · claims a job
                                  · layout() → ESC/POS bytes      · writes bytes
-                                 · queues the job                  to COM3
+                                 · queues the job                  to COM9
                                         │                              │
                                         └────── Supabase ──────────────┘
                                               receipts · print_jobs
 ```
 
-**The agent pulls, it never listens.** No port forwarding, no firewall change,
+**The connector pulls, it never listens.** No port forwarding, no firewall change,
 no inbound connection to the office. It also means staff can print from a phone.
 
-**The agent is deliberately dumb.** The server builds the finished bytes; the
-agent writes them to a serial port and reports back. It is ~150 lines and
+**The connector is deliberately dumb.** The server builds the finished bytes; the
+it writes them to a serial port and reports back. It is ~300 lines and
 almost never needs updating — which matters on a PC you cannot redeploy to.
 
 **One layout implementation.** `lib/receipt.ts` `layout()` produces the lines;
@@ -58,33 +58,39 @@ There are **no user accounts** — anyone with the URL can print. If you want a
 gate, set `ACCESS_CODE` to any string and open `https://<site>/?code=<string>`
 once per device.
 
-### 3. The agent, on the office PC
+### 3. The connector, on the office PC
 
 The printer must already be paired over Bluetooth (PIN `1234`, MAC
 `DC:0D:30:59:51:A9`) so Windows has given it an outgoing COM port.
 
-The agent has its own `package.json`. `serialport` is a native module and has
-no business in a serverless deploy, so the web app does not depend on it.
-
 ```
-cd agent
-copy .env.example .env      # then fill in the same Supabase values
+cd connector
 npm install
-npm run ports               # marks which port is the printer
-npm start
+npm run build:connector      # from the project root
 ```
 
-**The port is found by MAC, not by number.** This laptop has four Bluetooth SPP
-ports and only one of them is the printer (COM9 at the time of writing) — the
+That writes `dist/POS Printer Connector/`. Copy the whole folder to the
+office PC, then:
+
+1. edit `connector.env` with the two Supabase values
+2. double-click **Start Printer Connector.vbs** — it runs with no window
+3. run **Run at startup.cmd** once, so it comes back after a reboot
+
+`connector.log` beside it says what happened. `node connector.js --ports`
+lists serial ports and `--test` prints a slip.
+
+**Not a single .exe, deliberately.** Node's single-executable format works by
+injecting into `node.exe`, which invalidates its Authenticode signature, and
+Windows Smart App Control then blocks the result outright. The signed
+`node.exe` therefore ships untouched with the script beside it. Same result
+for the user: one folder, one file to double-click, no Node install, no npm.
+
+**The port is found by MAC, not by number.** This laptop has four Bluetooth
+SPP ports and only one is the printer (COM9 at the time of writing) — the
 others belong to headsets and to Windows itself, and writing ESC/POS to those
-would be worse than printing nothing. Windows also renumbers these ports after a
-re-pair or a reboot, so `PRINTER_PORT` is left blank and `PRINTER_MAC` does the
-work. Set `PRINTER_PORT` only to force a specific port.
-
-Leave it running. The site header shows `Agent: Online` within five seconds.
-
-To start it automatically at login: Win+R → `shell:startup` → put a shortcut to
-`npm start` there, with the `agent` folder as **Start in**.
+would be worse than printing nothing. Windows also renumbers these after a
+re-pair or a reboot, so `PRINTER_PORT` is left blank and `PRINTER_MAC` does
+the work.
 
 ## Daily use
 
@@ -94,6 +100,12 @@ To start it automatically at login: Win+R → `shell:startup` → put a shortcut
   to capitals as you type.
 - **Queue** — every job with its status. `Retry` re-queues a failed job.
   `Reprint` makes a deliberate second copy and is logged as one.
+- **On Android** there is a second button: *Print on this phone*. The phone
+  drives the printer itself over Bluetooth through [RawBT](https://rawbt.ru),
+  so no laptop and no connector need to be running. Pair the printer once in
+  Android's Bluetooth settings; the first print offers the RawBT install.
+- **On iPhone and desktop** the office connector is the only route to this
+  printer — see *Known ceilings*.
 
 Retrying a `SUCCESS` job is refused by the server, so no retry can ever produce
 a second physical receipt.
@@ -110,7 +122,7 @@ npm run check       # both
 ### Hardware work
 
 ```
-npm run print-test          # Phase 0: raw test print, no app involved (needs agent deps)
+npm run print-test          # Phase 0: raw test print, no app involved
 npm run bitmap              # re-render every phase0/assets/*.txt (-Threshold to tune weight)
 npm run inline-bitmap       # push the results into lib/
 ```
@@ -122,7 +134,7 @@ Results go in `docs/printer-verification.md`.
 - **Font B is unverified.** `DEFAULT_FONT` in `lib/receipt.ts` is `"A"` (32
   columns) because the self-test printed `¥` where `$` was expected. Long names
   wrap at 32 instead of 42 until `docs/printer-verification.md` says otherwise.
-- **One printer.** The agent claims from a single queue. Multiple printers need
+- **One printer.** The connector claims from a single queue. Multiple printers need
   a device id on the job.
 - **Templates are code, not data.** Changing the wording is a deploy. Move them
   to a table when someone needs to change it without shipping.
@@ -137,6 +149,17 @@ Results go in `docs/printer-verification.md`.
   the first print with a ruler before trusting it.
 - **No auto-cut.** `GS V` is not in the self-test, so jobs end with `ESC d 4`
   and the paper is torn by hand.
+- **iPhone cannot drive this printer directly.** Two independent reasons: iOS
+  reaches Bluetooth Classic only through MFi-certified accessories, and this
+  printer is not one; and the iOS 13+ CoreBluetooth exception needs GATT over
+  BR/EDR, which this printer does not expose (checked — it advertises SPP and
+  nothing else). iPhones create receipts and the office connector prints them.
+  A printer with Wi-Fi would remove the connector for every device at once.
+- **Plain `fs` cannot open a COM port on Windows.** `fs.openSync("COM9")`
+  creates a *file* named COM9 and reports success, so a receipt lands on disk
+  while the connector says it printed. That is why `serialport` is a hard
+  dependency, and why `assertRealPort()` refuses to write when a file of that
+  name is in the way.
 
 ## Headings
 
