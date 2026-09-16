@@ -1,0 +1,406 @@
+<title>HOP-H58 Printer Setup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper:      #f1f2f4;
+    --card:       #fbfbfc;
+    --ink:        #14181d;
+    --ink-soft:   #4a525c;
+    --ink-faint:  #79828d;
+    --rule:       #d3d7dd;
+    --rule-hard:  #b4bac2;
+    --accent:     #1d5c7a;
+    --accent-bg:  #e2edf2;
+    --warn:       #8a5200;
+    --warn-bg:    #f7edda;
+    --good:       #1b5e46;
+    --good-bg:    #dfefe7;
+    --bad:        #8c2f26;
+    --bad-bg:     #f6e3e0;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --display: "Archivo", "IBM Plex Sans", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #14171b;
+      --card:      #1b1f24;
+      --ink:       #e8eaed;
+      --ink-soft:  #aab2bc;
+      --ink-faint: #7b848f;
+      --rule:      #2c323a;
+      --rule-hard: #3d454f;
+      --accent:    #7ec2e0;
+      --accent-bg: #16303c;
+      --warn:      #e9b667;
+      --warn-bg:   #352a15;
+      --good:      #7fcfad;
+      --good-bg:   #16302610;
+      --good-bg:   #163026;
+      --bad:       #eda093;
+      --bad-bg:    #36211e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:     #14171b;
+    --card:      #1b1f24;
+    --ink:       #e8eaed;
+    --ink-soft:  #aab2bc;
+    --ink-faint: #7b848f;
+    --rule:      #2c323a;
+    --rule-hard: #3d454f;
+    --accent:    #7ec2e0;
+    --accent-bg: #16303c;
+    --warn:      #e9b667;
+    --warn-bg:   #352a15;
+    --good:      #7fcfad;
+    --good-bg:   #163026;
+    --bad:       #eda093;
+    --bad-bg:    #36211e;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .wrap {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 40px 72px;
+  }
+
+  /* The dashed rule is the receipt's own divider, used for every section break. */
+  .tear { border: 0; border-top: 1px dashed var(--rule-hard); margin: 0; }
+
+  header .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(30px, 7vw, 42px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0 0 12px;
+  }
+  header .lede {
+    font-size: 17px;
+    color: var(--ink-soft);
+    margin: 0 0 24px;
+    max-width: 34rem;
+  }
+
+  .spec {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 2px 20px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding-block: 18px;
+    border-top: 1px dashed var(--rule-hard);
+    border-bottom: 1px dashed var(--rule-hard);
+  }
+  .spec div { display: flex; justify-content: space-between; gap: 12px; }
+  .spec dt { color: var(--ink-faint); }
+  .spec dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 23px;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 48px 0 4px;
+  }
+  h2 + .sub { color: var(--ink-soft); margin: 0 0 20px; }
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 16px;
+    margin: 28px 0 8px;
+  }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1px 5px;
+    word-break: break-word;
+  }
+  pre {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.55;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule-hard);
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 0 0 14px;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+  /* Setup is a real sequence, so the numbers carry order, not decoration. */
+  ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; }
+  ol.steps > li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 2.1rem 1fr;
+    gap: 0 14px;
+    padding-block: 22px;
+    border-top: 1px solid var(--rule);
+  }
+  ol.steps > li::before {
+    content: counter(step);
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  ol.steps h3 { margin: 0 0 8px; grid-column: 2; }
+  ol.steps > li > :not(h3) { grid-column: 2; }
+  ol.steps > li > :last-child { margin-bottom: 0; }
+
+  .rule-box {
+    background: var(--accent-bg);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: 16px 18px;
+    margin: 24px 0;
+  }
+  .rule-box p:last-child { margin-bottom: 0; }
+  .rule-box strong { font-weight: 600; }
+
+  /* Outcomes: what the paper does, and what that means. */
+  .outcomes { display: grid; gap: 10px; margin: 0 0 14px; }
+  .outcome {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--rule);
+    background: var(--card);
+  }
+  .outcome .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    align-self: start;
+    white-space: nowrap;
+  }
+  .tag.ok   { background: var(--good-bg); color: var(--good); }
+  .tag.warn { background: var(--warn-bg); color: var(--warn); }
+  .tag.bad  { background: var(--bad-bg);  color: var(--bad); }
+  .outcome .what { font-weight: 600; }
+  .outcome .then { grid-column: 2; color: var(--ink-soft); }
+
+  /* Troubleshooting is looked up by the exact text on screen, so that text
+     is the key and everything else hangs off it. */
+  .fault { border-top: 1px solid var(--rule); padding-block: 20px; }
+  .fault .said {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--bad);
+    background: var(--bad-bg);
+    display: inline-block;
+    padding: 3px 8px;
+    margin-bottom: 10px;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .fault .means { margin: 0 0 10px; }
+  .fault .means b { font-weight: 600; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .scroll { overflow-x: auto; margin-bottom: 14px; }
+  th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; }
+  td code { white-space: nowrap; }
+
+  ul.plain { margin: 0 0 14px; padding-left: 20px; }
+  ul.plain li { margin-bottom: 6px; }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px dashed var(--rule-hard);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  footer p { margin: 0 0 6px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Plot Receipt Printing</p>
+    <h1>HOP-H58 Printer Setup</h1>
+    <p class="lede">Everything needed to get one Windows laptop printing 58&nbsp;mm receipts over the USB cable — and what each way it fails actually means.</p>
+    <dl class="spec">
+      <div><dt>Model</dt><dd>DNT-585-LU5325</dd></div>
+      <div><dt>Also marked</dt><dd>HOP-H58</dd></div>
+      <div><dt>Paper</dt><dd>58 mm thermal</dd></div>
+      <div><dt>Print head</dt><dd>384 dots</dd></div>
+      <div><dt>USB id</dt><dd>0456:0808</dd></div>
+      <div><dt>Bluetooth</dt><dd>DC:0D:30:59:51:A9</dd></div>
+    </dl>
+  </header>
+
+  <div class="rule-box">
+    <p><strong>One PC runs the connector. Only one.</strong></p>
+    <p>There is a single print queue, and whichever connector claims a job first gets it. A second connector on a laptop with no printer will take receipts and fail them — which is exactly how an afternoon was lost to <code>Opening COM9: File not found</code> while the printer sat on a different laptop's cable.</p>
+  </div>
+
+  <h2>What you need</h2>
+  <p class="sub">Nothing is downloaded and nothing is installed from a disc.</p>
+  <ul class="plain">
+    <li>The printer, its power supply, and the USB cable.</li>
+    <li>A roll of 58 mm thermal paper.</li>
+    <li>The <code>POS Printer Connector</code> folder, copied from the project's <code>dist/</code>. It carries its own <code>node.exe</code> and your Supabase keys, so the laptop needs no Node, no npm and no configuring.</li>
+    <li>Administrator rights, once, for the setup step.</li>
+  </ul>
+  <p>You do <em>not</em> need the printer's own driver disc. Receipts are sent as RAW ESC/POS bytes, so Windows' built-in <b>Generic / Text Only</b> driver carries them through untouched.</p>
+
+  <h2>Setting the laptop up</h2>
+  <p class="sub">Six steps, once per laptop.</p>
+
+  <ol class="steps">
+    <li>
+      <h3>Load the paper the right way up</h3>
+      <p>Only one side of thermal paper takes an image, and a roll put in backwards feeds perfectly while printing nothing at all. Scratch the paper hard with a fingernail: the side that goes dark is the side that must face the print head.</p>
+      <p>Close the lid until it clicks. A lid that is merely resting shut makes the printer ignore everything sent to it.</p>
+    </li>
+    <li>
+      <h3>Plug the cable in and switch the printer on</h3>
+      <p>Straight into the laptop, not through a hub. The power light should be steady, not blinking — blinking is out of paper or lid open.</p>
+    </li>
+    <li>
+      <h3>Run <code>Setup printer.cmd</code> as administrator</h3>
+      <p>Right-click it in the connector folder and choose <b>Run as administrator</b>. It needs those rights because adding a printer and moving a port both do.</p>
+      <p>It finds the port the printer actually came up on, then either moves an existing queue onto that port or creates one with the Generic / Text Only driver, and prints a test slip.</p>
+    </li>
+    <li>
+      <h3>Read the slip, not the screen</h3>
+      <p>A queue accepting bytes is not paper. This is the step that tells you the truth:</p>
+      <div class="outcomes">
+        <div class="outcome">
+          <span class="tag ok">Slip</span>
+          <span class="what">USB SETUP OK printed</span>
+          <span class="then">Done. Go to step 5.</span>
+        </div>
+        <div class="outcome">
+          <span class="tag warn">Blank</span>
+          <span class="what">Paper moved, nothing on it</span>
+          <span class="then">The roll is in upside down. Take it out, turn it over, run the setup again.</span>
+        </div>
+        <div class="outcome">
+          <span class="tag bad">Still</span>
+          <span class="what">Nothing moved at all</span>
+          <span class="then">The printer is not taking data. Check the power light, the lid, and try another USB port before anything else.</span>
+        </div>
+      </div>
+    </li>
+    <li>
+      <h3>Start the connector</h3>
+      <p>Double-click <b>Start Printer Connector.vbs</b>. It runs with no window on purpose — there is no terminal for anyone to close by accident. What it is doing is written to <code>connector.log</code> beside it.</p>
+    </li>
+    <li>
+      <h3>Make it survive a reboot</h3>
+      <p>Run <b>Run at startup.cmd</b> once. It puts a shortcut in this user's Startup folder.</p>
+      <p>To undo that later — and you must, on any laptop that stops being the printer's laptop — delete <code>POS Printer Connector.lnk</code> from:</p>
+      <pre><code>%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup</code></pre>
+    </li>
+  </ol>
+
+  <h2>Printing, day to day</h2>
+  <p class="sub">Once the laptop is set up, nobody touches it again.</p>
+  <p>Open the website on any device, fill in the four fields, press <b>Print</b>. The receipt number comes from the database, so two people printing at the same moment cannot collide. The receipt comes out of whichever laptop is running the connector.</p>
+  <p>On an <b>Android phone</b> there is a second button, <em>Print on this phone</em>. The phone drives the printer itself over Bluetooth through the free RawBT app, so no laptop needs to be awake at all. Pair the printer once in Android's Bluetooth settings — the PIN is <code>1234</code>.</p>
+  <p>On an <b>iPhone</b>, and in <b>Firefox or Safari</b> on a desktop, the connector is the only route. iOS cannot reach this printer directly: it speaks Bluetooth Classic only through MFi-certified accessories, and this is not one.</p>
+  <p>Two small things that are normal and not faults: the screen shows <code>₹</code> where the paper shows <code>Rs.</code>, because the printer has no rupee glyph; and there is no auto-cutter, so the paper is torn by hand against the bar.</p>
+
+  <h2>When something goes wrong</h2>
+  <p class="sub">Look up the exact words you were given.</p>
+
+  <div class="fault">
+    <div class="said">Opening COM9: File not found</div>
+    <p class="means"><b>A connector on the wrong laptop claimed the receipt.</b> It went looking for the Bluetooth COM port, and that laptop either has no Bluetooth or is not the one holding the printer.</p>
+    <p>Stop the connector on every laptop except the printer's, and delete its Startup shortcut. Then reprint from the Queue.</p>
+  </div>
+
+  <div class="fault">
+    <div class="said">USB printer Windows would use: none found</div>
+    <p class="means"><b>The connector can see no printer on a live USB port.</b> Either the printer is not enumerating, or its queue is pointed somewhere else.</p>
+    <p>Open <code>connector.log</code>. If the queue is on the wrong port the log names it and gives you the one command that fixes it — that case is common enough that the connector refuses to print rather than write into a port with nothing behind it.</p>
+  </div>
+
+  <div class="fault">
+    <div class="said">"POS-58-Series (1)" is on port Printer PORT:, but the printer is on USB002</div>
+    <p class="means"><b>The queue and the cable have drifted apart.</b> The vendor's installer creates its queue on a private <code>Printer PORT:</code> monitor that is attached to nothing, and Windows renumbers the printer to <code>USB003</code> and up after a replug. Both look completely healthy: Windows accepts every receipt, drains the spooler, and the paper stays blank.</p>
+    <p>Run the command the log prints, or just run <code>Setup printer.cmd</code> again:</p>
+    <pre><code>Set-Printer -Name "POS-58-Series (1)" -PortName "USB002"</code></pre>
+  </div>
+
+  <div class="fault">
+    <div class="said">No Printer Attached</div>
+    <p class="means"><b>Windows' own words for a printer port with nothing answering on it.</b> The device node exists; the printer behind it does not respond.</p>
+    <p>This is a hardware state, not a settings problem. Power, lid, cable, another USB port — in that order.</p>
+  </div>
+
+  <div class="fault">
+    <div class="said">Receipt saved but not printed</div>
+    <p class="means"><b>The receipt number is safe.</b> It is in the database and nothing is lost; only the paper is missing.</p>
+    <p>Fix the printer, then open <b>Queue</b> and press <b>Reprint</b> on that receipt. Reprint is deliberate and logged as a second copy — which is why <b>Retry</b> refuses to touch a job already marked successful.</p>
+  </div>
+
+  <div class="fault">
+    <div class="said">Paper comes out blank</div>
+    <p class="means"><b>Almost always the roll, in upside down.</b> Feeding works from either side; printing does not.</p>
+    <p>The test that settles it without a computer: switch the printer off, hold the FEED button, switch it on. That prints the printer's own firmware page. If that is blank too, it is the paper or the head, and nothing in the software can matter.</p>
+  </div>
+
+  <h2>Commands worth knowing</h2>
+  <p class="sub">Run these from inside the connector folder, where <code>node.exe</code> lives.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Command</th><th>Answers</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>node.exe connector.js --ports</code></td><td>Which COM ports exist, and which Windows printer the connector would use over USB.</td></tr>
+        <tr><td><code>node.exe connector.js --test</code></td><td>Prints a slip through whichever route is live, USB or Bluetooth.</td></tr>
+        <tr><td><code>connector.log</code></td><td>Every job claimed, the route it took, and why any of them failed.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>At startup the log records the route in one line — <code>printer: POS-58-Series (1) (USB)</code>, or <code>printer: COM9</code> for Bluetooth, or <code>NOT FOUND</code>. If that line is missing entirely, the folder is an old build from before USB support; copy a fresh one.</p>
+
+  <h2>Why it works this way</h2>
+  <p class="sub">The short version, for whoever inherits this.</p>
+  <p>A web page cannot reach a USB thermal printer on Windows. <code>usbprint.sys</code> binds itself to any USB printer-class device and will not release it, so the browser is refused the handle — measured on this printer, which comes up as <code>USB\VID_0456&amp;PID_0808\PRINTER</code> owned by <em>USB Printing Support</em>. Getting round that needs a driver swap with Zadig, an administrator, and the loss of the Windows print queue, repeated on every laptop.</p>
+  <p>But that same driver holding the device is what gives Windows a print queue for it — and a program running on the machine may push RAW bytes into that queue, which reach the port without the driver rendering anything. So the cable is handled by the connector, which is already on the machine, and the browser is never asked to do something it cannot.</p>
+
+  <footer>
+    <p>Plot Receipt Printing — printer setup guide</p>
+    <p>Verified on the hardware: USB discovery, the RAW write, the spooler handing bytes to the port, and paper moving. Not yet verified: a completed receipt in ink, which is waiting on a printer that stopped answering mid-diagnosis.</p>
+  </footer>
+</div>

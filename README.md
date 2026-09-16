@@ -97,6 +97,12 @@ the printer sat on a different laptop's USB cable. Stop the other connector and
 delete its shortcut from
 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
 
+There is a guide for whoever does this at the laptop rather than in the repo:
+[`docs/printer-setup-guide.html`](docs/printer-setup-guide.html), published at
+<https://claude.ai/artifact/MunBY8rhiX3i3WMNHsfDVZ>. It covers the six steps,
+what each way the paper fails actually means, and every error message this
+printer has produced so far, looked up by the exact words on screen.
+
 #### Setup printer.cmd
 
 Everything it does is something a person would otherwise type, and two of those
