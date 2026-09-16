@@ -91,7 +91,7 @@ export default function Queue() {
               <span className="font-mono text-sm">{job.receipts?.receipt_no ?? "—"}</span>
               <span className="text-sm text-neutral-700">
                 {job.receipts?.data.customerName ?? ""}
-                {job.receipts ? ` · ${formatCurrency(job.receipts.amount_paise, "preview")}` : ""}
+                {job.receipts?.amount_paise ? ` · ${formatCurrency(job.receipts.amount_paise, "preview")}` : ""}
               </span>
               {job.is_reprint && (
                 <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">reprint</span>
