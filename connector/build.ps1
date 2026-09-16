@@ -33,6 +33,10 @@ Write-Output "     signature: $($sig.Status)"
 Write-Output "2/3  copying the connector"
 Copy-Item (Join-Path $PSScriptRoot "connector.js") $target -Force
 Copy-Item (Join-Path $PSScriptRoot "package.json") $target -Force
+# The one-off USB setup. Everything it does is something a person would
+# otherwise type, and two of those things are traps nobody guesses.
+Copy-Item (Join-Path $PSScriptRoot "setup-printer.ps1") $target -Force
+Copy-Item (Join-Path $PSScriptRoot "Setup printer.cmd") $target -Force
 
 # serialport is a native addon and must travel with its compiled binding. It is
 # also not optional: plain fs cannot open a COM device on Windows - it silently
@@ -79,6 +83,7 @@ Write-Output ""
 Write-Output "built: $target  ($mb MB)"
 Write-Output ""
 Write-Output "On the office PC:"
-Write-Output "  1. copy the whole folder anywhere"
+Write-Output "  1. copy the whole folder anywhere
+  0. plugging in over USB? right-click 'Setup printer.cmd' - Run as administrator"
 Write-Output "  2. double-click 'Start Printer Connector.vbs'"
 Write-Output "  3. run 'Run at startup.cmd' once, so it survives a reboot"

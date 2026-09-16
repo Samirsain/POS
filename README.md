@@ -69,9 +69,9 @@ once per device.
 The printer needs to be reachable one of two ways, and the connector prefers
 the first:
 
-- **USB** — plug it in and install its Windows driver the normal way (the
-  vendor's installer). That is all: the connector finds the queue itself and
-  pushes RAW ESC/POS into it. Verified here as `POS-58-Series (1)`.
+- **USB** — plug it in and run **Setup printer.cmd** once (below). The
+  connector then finds the queue itself and pushes RAW ESC/POS into it.
+  Verified here as `POS-58-Series (1)`.
 - **Bluetooth** — pair it (PIN `1234`, MAC `DC:0D:30:59:51:A9`) so Windows
   gives it an outgoing COM port. Used when the cable is not in.
 
@@ -81,12 +81,36 @@ npm install
 npm run build:connector      # from the project root
 ```
 
-That writes `dist/POS Printer Connector/`. Copy the whole folder to the PC that
-is paired with the printer — often the same laptop you develop on — then:
+That writes `dist/POS Printer Connector/`. Copy the whole folder to the PC the
+printer is attached to — often the same laptop you develop on — then:
 
 1. edit `connector.env` with the two Supabase values
-2. double-click **Start Printer Connector.vbs** — it runs with no window
-3. run **Run at startup.cmd** once, so it comes back after a reboot
+2. **over USB:** right-click **Setup printer.cmd** → *Run as administrator*
+3. double-click **Start Printer Connector.vbs** — it runs with no window
+4. run **Run at startup.cmd** once, so it comes back after a reboot
+
+**Only one PC may run the connector.** There is one queue and the connector
+that claims a job first wins, so a second one on a laptop with no printer will
+take receipts and fail them. That is not a theory: it happened, and the log
+read `Opening COM9: File not found` on a machine whose Bluetooth was off while
+the printer sat on a different laptop's USB cable. Stop the other connector and
+delete its shortcut from
+`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
+
+#### Setup printer.cmd
+
+Everything it does is something a person would otherwise type, and two of those
+things are traps nobody guesses. It finds the port the printer is actually on,
+then either moves an existing queue onto it or creates one, and prints a slip
+so the answer is paper rather than a status code.
+
+No vendor driver is needed. Receipts are RAW ESC/POS, so Windows' own
+**Generic / Text Only** driver carries them through untouched — which matters
+on a fresh laptop with no installer to hand. If the vendor's driver is already
+installed, its queue is moved rather than replaced.
+
+It needs administrator rights, because adding a printer and moving a port both
+do. It asks for them instead of failing halfway.
 
 `connector.log` beside it says what happened. `node connector.js --ports`
 lists serial ports and `--test` prints a slip.
@@ -137,7 +161,7 @@ a second physical receipt.
 
 ```
 npm run dev         # http://localhost:3000
-npm test            # layout, money, and byte-level checks
+npm test            # layout, money, byte-level and printer-queue checks
 npm run typecheck
 npm run check       # both
 ```
@@ -183,13 +207,31 @@ Results go in `docs/printer-verification.md`.
   so that is what the connector does.
 - **RAW to a queue means the spooler took it, not that paper came out.** If the
   printer is off or unplugged the job would sit in the queue while the
-  connector reported `SUCCESS`, so the USB route is used only when a device
-  driven by `usbprint` is actually present. That check is the honest part; the
-  spooler's acceptance is not.
-- **The USB queue is picked by name.** A queue on a USB port whose name matches
-  `pos|58|thermal|receipt` wins, or the only candidate if there is just one.
-  Anything else logs what it saw and falls back to Bluetooth — set
-  `PRINTER_NAME` in `connector.env` to settle it.
+  connector reported `SUCCESS`, so the USB route is used only when the queue's
+  port is the port a plugged-in printer is on this minute:
+
+  ```
+  USBPRINT\UNKNOWNPRINTER\7&19B07E4B&0&USB002   the printer, right now
+  POS-58-Series (1)   PortName: USB002           the queue, matching
+  ```
+
+  The two drift apart on their own, and both ways of drifting print nothing
+  while looking fine. This printer shipped with its queue on the vendor's
+  `Printer PORT:` monitor, attached to nothing — Windows accepted every
+  receipt, drained the spooler, and the paper stayed blank. Windows also
+  renumbers the device to `USB003` and up after a replug, leaving the queue
+  aimed at a port with nothing behind it. Both fall back to Bluetooth, and the
+  log names the one command that fixes it:
+
+  ```
+  Set-Printer -Name "POS-58-Series (1)" -PortName "USB002"
+  ```
+
+- **The USB queue is picked by name.** Among the queues on the live port, one
+  matching `pos|58|thermal|receipt` wins, or the only candidate if there is
+  just one. Anything else logs what it saw and falls back to Bluetooth — set
+  `PRINTER_NAME` in `connector.env` to settle it. `npm test` covers every one
+  of these cases; none of them need a printer.
 - **iPhone cannot drive this printer directly.** Two independent reasons: iOS
   reaches Bluetooth Classic only through MFi-certified accessories, and this
   printer is not one; and the iOS 13+ CoreBluetooth exception needs GATT over

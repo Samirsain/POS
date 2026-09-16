@@ -144,62 +144,115 @@ function listAllPorts() {
  * push RAW bytes into that queue, which reach the port untouched by the
  * driver. So the easy USB path is here, not in the page.
  *
- * Two things must both be true before this is used, because a queue will
- * happily accept a receipt for a printer that is not plugged in and hold it
- * there forever while we report SUCCESS:
+ * A queue will happily accept a receipt for a printer that is not plugged in
+ * and hold it there forever while we report SUCCESS, so the queue alone is
+ * never enough. What is checked is that the queue's port is the port the live
+ * device is actually on:
  *
- *   1. a device driven by usbprint is physically present, and
- *   2. a queue exists on a USB port that looks like this printer.
+ *   USBPRINT\UNKNOWNPRINTER\7&19B07E4B&0&USB002   <- the plugged-in printer
+ *   POS-58-Series (1)  PortName: USB002            <- the queue, matching
+ *
+ * The port name is written into the queue once and never updated, so the two
+ * drift apart on their own. This printer shipped with a queue on the vendor's
+ * own "Printer PORT:" monitor, which is attached to nothing: Windows accepted
+ * every receipt, drained the spooler, and the paper stayed blank. Windows also
+ * renumbers the device to USB003 and up after a replug, which leaves the queue
+ * pointing at a port that no longer has a printer behind it. Both cases look
+ * identical from here and both must fall back to Bluetooth rather than print
+ * into a hole.
  */
 function discoverUsbPrinter(forcedName) {
   const script = [
-    // Win32_PnPEntity lists present devices only, so this is the cable itself.
-    "$present = @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |",
-    "  Where-Object { $_.Service -eq 'usbprint' });",
-    // No queue is reported unless the cable is in: the lines below are the
-    // only output, so an empty result means "print over Bluetooth instead".
-    "if ($present.Count -gt 0) {",
-    "  Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue |",
-    "    Where-Object { $_.PortName -like 'USB*' -or $_.PortName -like 'Printer PORT*' } |",
-    "    ForEach-Object { \"$($_.Name)`t$($_.PortName)`t$($_.WorkOffline)\" }",
-    "}",
+    // Win32_PnPEntity lists present devices only, so a USBPRINT node here is a
+    // printer that is plugged in right now. Its instance id ends in the port
+    // Windows put it on, which is the only authority on where the cable is.
+    "@(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |",
+    "  Where-Object { $_.DeviceID -like 'USBPRINT*' } |",
+    "  ForEach-Object { if ($_.DeviceID -match '(USB\\d+)$') { \"LIVE`t$($Matches[1])\" } });",
+    // Every queue on a USB-ish port, matched up in Node rather than here, so a
+    // queue on the wrong port can be named in the log instead of vanishing.
+    "@(Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue |",
+    "  Where-Object { $_.PortName -like 'USB*' -or $_.PortName -like 'Printer PORT*' } |",
+    "  ForEach-Object { \"QUEUE`t$($_.Name)`t$($_.PortName)`t$($_.WorkOffline)\" });",
     // Joined with spaces, so every statement boundary carries its own
     // semicolon - PowerShell gets one line and no newlines to rely on.
   ].join(" ");
 
-  let queues;
+  let rows;
   try {
-    queues = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    rows = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
       timeout: 20000,
       windowsHide: true,
     })
       .trim()
       .split(/\r?\n/)
-      .map((line) => line.split("\t"))
-      .filter((parts) => parts.length === 3 && parts[0])
-      .map(([name, port, offline]) => ({ name, port, offline: /true/i.test(offline) }));
+      .map((line) => line.trim().split("\t"));
   } catch (e) {
     log("usb printer lookup failed:", e.message);
     return null;
   }
 
+  return chooseUsbQueue(rows, forcedName, log);
+}
+
+/**
+ * Which queue, if any, the receipts should go to - the decision on its own,
+ * with the PowerShell left behind so it can be tested on a machine with no
+ * printer attached to it.
+ */
+function chooseUsbQueue(rows, forcedName, log = () => {}) {
+  const livePorts = rows.filter((r) => r[0] === "LIVE" && r[1]).map((r) => r[1].toUpperCase());
+  const queues = rows
+    .filter((r) => r[0] === "QUEUE" && r.length === 4 && r[1])
+    .map(([, name, port, offline]) => ({ name, port, offline: /true/i.test(offline) }));
+
+  if (livePorts.length === 0) return null; // no cable, so Bluetooth it is
+
+  // The whole point: a queue is only usable if it points at a port that has a
+  // printer on it this minute.
+  const onLivePort = (q) => livePorts.includes(q.port.toUpperCase());
+
   if (forcedName) {
     const forced = queues.find((q) => q.name.toLowerCase() === forcedName.toLowerCase());
-    if (!forced) log(`PRINTER_NAME "${forcedName}" is not a USB printer on this PC`);
-    return forced ? forced.name : null;
+    if (!forced) {
+      log(`PRINTER_NAME "${forcedName}" is not a printer on a USB port on this PC`);
+      return null;
+    }
+    if (!onLivePort(forced)) {
+      log(explainWrongPort(forced, livePorts));
+      return null;
+    }
+    return forced.name;
   }
 
   // A queue Windows has already given up on is not the one we want, and a
   // printer whose name says nothing about receipts is somebody's laser.
   const candidates = queues.filter((q) => !q.offline);
   const thermal = candidates.filter((q) => /pos|58|thermal|receipt/i.test(q.name));
-  if (thermal.length === 1) return thermal[0].name;
-  if (thermal.length === 0 && candidates.length === 1) return candidates[0].name;
-  if (candidates.length > 1) {
-    log(`no obvious receipt printer among ${candidates.map((q) => q.name).join(", ")} - set PRINTER_NAME`);
+  const shortlist = thermal.length > 0 ? thermal : candidates;
+  const usable = shortlist.filter(onLivePort);
+
+  if (usable.length === 1) return usable[0].name;
+  if (usable.length > 1) {
+    log(`several printers on the live USB port (${usable.map((q) => q.name).join(", ")}) - set PRINTER_NAME`);
+    return null;
   }
+  // Something that looks right exists but is wired somewhere else. Say so:
+  // this is the failure that prints nothing and reports success.
+  for (const q of shortlist) log(explainWrongPort(q, livePorts));
   return null;
+}
+
+/**
+ * The one message worth getting right in this file. A queue on the wrong port
+ * swallows receipts silently, and the fix is a single command nobody guesses.
+ */
+function explainWrongPort(queue, livePorts) {
+  return (
+    `"${queue.name}" is on port ${queue.port}, but the printer is on ${livePorts.join(" or ")} - ` +
+    `not printing over USB. Fix it with:  Set-Printer -Name "${queue.name}" -PortName "${livePorts[0]}"`
+  );
 }
 
 /**
@@ -511,7 +564,11 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  log("fatal:", String(e && e.stack ? e.stack : e));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    log("fatal:", String(e && e.stack ? e.stack : e));
+    process.exit(1);
+  });
+}
+
+module.exports = { chooseUsbQueue };

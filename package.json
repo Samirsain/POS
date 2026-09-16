@@ -10,7 +10,7 @@
     "check": "npm run typecheck && npm test",
     "bitmap": "powershell -ExecutionPolicy Bypass -File phase0/make-bitmaps.ps1",
     "print-test": "node phase0/print-test.mjs",
-    "test": "tsx --test lib/receipt.test.ts",
+    "test": "tsx --test lib/receipt.test.ts connector/connector.test.js",
     "typecheck": "tsc --noEmit",
     "inline-bitmap": "node scripts/inline-bitmap.mjs",
     "db:migrate": "node scripts/migrate.mjs",
