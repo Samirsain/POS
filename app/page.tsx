@@ -56,7 +56,7 @@ export default function NewReceipt() {
       date: formatDate(today),
       // Rupees typed in, paise into the layout engine — the same conversion the
       // server does, so the preview cannot drift from the paper.
-      amount: Math.round((Number(values.amount) || 0) * 100),
+      amount: Number(values.amount) > 0 ? Math.round(Number(values.amount) * 100) : "",
     };
     return layout(resolveTemplate(TEMPLATE, DEFAULT_HEADER_SIZE), data, "preview");
   }, [values, nextNo, today]);
@@ -67,8 +67,7 @@ export default function NewReceipt() {
   // the printer PC is the headline or the fallback.
   const localRoute = onAndroid ? "Print on this phone" : null;
 
-  const missing = entryFields.filter((f) => !values[f]?.trim());
-  const canPrint = missing.length === 0 && Number(values.amount) > 0 && !busy;
+  const canPrint = !busy;
 
   /**
    *   agent — queued for whichever PC is running the connector

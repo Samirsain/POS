@@ -15,11 +15,12 @@ import { encode, UnprintableCharacterError } from "@/lib/escpos";
 export const runtime = "nodejs"; // Buffer + ESC/POS encoding
 
 const bodySchema = z.object({
-  projectCode: z.string().trim().min(1, "Project is required"),
-  plotNo: z.string().trim().min(1, "Plot No. is required"),
-  customerName: z.string().trim().min(1, "Name is required"),
-  /** Rupees as typed by the operator. Converted to paise here and never again. */
-  amount: z.coerce.number().positive("Amount must be more than zero"),
+  // All optional: a blank receipt prints with empty lines to fill in by hand.
+  projectCode: z.string().trim().default(""),
+  plotNo: z.string().trim().default(""),
+  customerName: z.string().trim().default(""),
+  /** Rupees as typed by the operator. Converted to paise here and never again. Blank = 0. */
+  amount: z.coerce.number().nonnegative("Amount cannot be negative").default(0),
   /** Optional manual override; the DB sequence allocates when this is absent. */
   receiptNo: z.string().trim().regex(/^\d{1,8}$/).optional(),
   templateId: z.enum(Object.keys(TEMPLATES) as [string, ...string[]]).default(DEFAULT_TEMPLATE_ID),
@@ -75,7 +76,8 @@ export async function POST(request: Request) {
     projectCode: input.projectCode,
     plotNo: input.plotNo,
     customerName: input.customerName,
-    amount: amountPaise,
+    // Blank stays blank on paper rather than printing "Rs. 0 / Zero Rupees".
+    amount: amountPaise > 0 ? amountPaise : "",
     date: new Date().toISOString(),
     templateId: input.templateId,
     headerSize: input.headerSize,
