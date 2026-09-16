@@ -25,6 +25,7 @@ Run: `npm run print-test` (add `--port COM4` if COM3 is the wrong one).
 - [ ] `Amount  Rs. 25,000` is bold, and reads `Rs.` not `¥s.`
 - [ ] Blank space after `Sign` clears the tear bar when torn
 
+
 ## 2. Font B character test (spec §1.3)
 
 The self-test showed `0x24` as `$` in Font A but `¥` in Font B. `ESC R 0` is
