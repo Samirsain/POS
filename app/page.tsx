@@ -51,7 +51,7 @@ export default function NewReceipt() {
   );
   // Picked once per browser profile; Chrome remembers the grant across reloads,
   // and reports the cable coming and going after that.
-  const { device: usbPrinter, connect: connectUsb } = useUsbPrinter();
+  const { device: usbPrinter, error: usbError, connect: connectUsb } = useUsbPrinter();
 
   const today = useMemo(() => new Date(), []);
   // The database allocates the real number; this is what it will be next, so
@@ -74,14 +74,14 @@ export default function NewReceipt() {
   }, [values, nextNo, today]);
 
   // The button this device can print with on its own, if it has one. It also
-  // decides whether the office connector is the headline or the fallback.
+  // decides whether the printer PC is the headline or the fallback.
   const localRoute = onAndroid ? "Print on this phone" : onUsb ? "Print on the USB printer" : null;
 
   const missing = entryFields.filter((f) => !values[f]?.trim());
   const canPrint = missing.length === 0 && Number(values.amount) > 0 && !busy;
 
   /**
-   *   agent — queued for the office connector
+   *   agent — queued for whichever PC is running the connector
    *   rawbt — this Android phone prints it over Bluetooth
    *   usb   — this laptop prints it over the cable
    * The last two are the same bargain to the server: it hands back the bytes
@@ -143,7 +143,7 @@ export default function NewReceipt() {
         return;
       }
 
-      // Nothing is running on the office PC, so no one is going to claim this
+      // No connector is running anywhere, so no one is going to claim this
       // job. The receipt is saved and will print when the connector is back —
       // say that now instead of spinning for 45 seconds first.
       if (status && !status.agentOnline) {
@@ -167,7 +167,9 @@ export default function NewReceipt() {
     } catch (e) {
       // A cancelled device chooser is a change of mind, not a failure.
       if (e instanceof DOMException && e.name === "NotFoundError") return;
-      setResult({ kind: "failed", receiptNo: null, message: String(e) });
+      // No receipt exists on this path — connecting happens before the POST —
+      // so this is the printer's problem, not a lost number.
+      setResult({ kind: "failed", receiptNo: null, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
@@ -204,7 +206,7 @@ export default function NewReceipt() {
 
           {/* Whatever the device in front of you can drive itself is the primary
               button: the phone over Bluetooth, the laptop over the cable. The
-              office connector is the fallback, and the only route on iPhone. */}
+              printer PC is the fallback, and the only route on iPhone. */}
           {onAndroid && (
             <button
               className="mt-2 rounded bg-neutral-900 px-4 py-3 text-base font-semibold text-white disabled:bg-neutral-300"
@@ -234,7 +236,7 @@ export default function NewReceipt() {
             disabled={!canPrint}
             onClick={() => print("agent")}
           >
-            {busy ? "Printing…" : localRoute ? "Print on the office printer" : "Print"}
+            {busy ? "Printing…" : localRoute ? "Send to the printer PC" : "Print"}
           </button>
 
           {onAndroid && (
@@ -261,25 +263,31 @@ export default function NewReceipt() {
                 >
                   Connect the USB printer
                 </button>
-                <p className="text-xs text-neutral-500">
-                  Plug the printer into this computer with the cable, then pick it once. Chrome
-                  remembers it after that.
-                </p>
+                {usbError ? (
+                  <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">{usbError}</p>
+                ) : (
+                  <p className="text-xs text-neutral-500">
+                    Plug the printer into this computer with the cable, then pick it once. Chrome
+                    remembers it after that.
+                  </p>
+                )}
               </>
             ))}
 
-          {/* Shown on the phone too. The office connector being down is exactly
-              what a phone cannot see, and the phone has a way round it. Nobody
+          {/* Only when the printer PC is your route, or when jobs are
+              sitting in its queue. On a device that prints for itself, a
+              machine in another room being asleep is not news — and pressing
+              that button anyway says so at the moment it matters. Nobody
               home and printer-not-answering are different promises: only the
               first one prints by itself later. */}
-          {status && !status.printerConnected && (
+          {status && !status.printerConnected && (!localRoute || status.pendingJobs > 0) && (
             <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
               {!status.agentOnline ? (
                 <>
-                  The office printer is offline — the office PC is asleep, or the connector is not
-                  running on it.{" "}
+                  The printer PC is not answering — it is asleep, or the connector is not running
+                  on it.{" "}
                   {localRoute
-                    ? `${localRoute} still works. Anything sent to the office printer waits until it is back.`
+                    ? `${localRoute} still works. Anything sent to the printer PC waits until it is back.`
                     : "You can still press Print: the receipt is saved and prints as soon as the connector is back."}
                 </>
               ) : (
@@ -302,8 +310,8 @@ export default function NewReceipt() {
           )}
           {result.kind === "queued" && (
             <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Receipt no. {result.receiptNo} saved and waiting. It prints as soon as the office
-              connector is back — see Queue.
+              Receipt no. {result.receiptNo} saved and waiting. It prints as soon as the printer
+              PC is back — see Queue.
             </p>
           )}
           {result.kind === "printing" && (

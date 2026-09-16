@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { isAndroid } from "./rawbt";
+import { hasWebUsb, useUsbPrinter } from "./usb";
 
 export type Status = {
   agentOnline: boolean;
@@ -54,24 +56,61 @@ function Dot({ ok }: { ok: boolean }) {
   );
 }
 
+/**
+ * What the device in front of you can print with.
+ *
+ * The connector runs on somebody else's machine — which may well be this one,
+ * but that is never the point. Reporting it as the status on a laptop that
+ * prints over its own cable was two red dots about something that was never
+ * going to stop that laptop printing, so it only appears now when it is
+ * actually your route, or when jobs are sitting in its queue.
+ */
 export default function AgentStatus() {
-  const { status, reachable } = useStatus();
+  const { status } = useStatus();
+  // Rendered on the server with no user agent, corrected on hydration.
+  const onAndroid = useSyncExternalStore(
+    () => () => {},
+    () => isAndroid(),
+    () => false,
+  );
+  const onUsb = useSyncExternalStore(
+    () => () => {},
+    () => hasWebUsb() && !isAndroid(),
+    () => false,
+  );
+  const { device } = useUsbPrinter();
 
-  if (!reachable || !status) {
-    return <p className="text-sm text-neutral-500">Checking printer…</p>;
-  }
+  const local = onAndroid || onUsb;
+  const showOffice = status && (!local || status.pendingJobs > 0);
 
   return (
     <div className="flex items-center gap-4 text-sm">
-      <span className="flex items-center gap-1.5">
-        <Dot ok={status.agentOnline} />
-        Agent: {status.agentOnline ? "Online" : "Offline"}
-      </span>
-      <span className="flex items-center gap-1.5">
-        <Dot ok={status.printerConnected} />
-        Printer: {status.printerConnected ? `Connected${status.port ? ` (${status.port})` : ""}` : "Disconnected"}
-      </span>
-      {status.pendingJobs > 0 && (
+      {onUsb && (
+        <span className="flex items-center gap-1.5">
+          <Dot ok={!!device} />
+          USB printer: {device ? "Connected" : "Not connected"}
+        </span>
+      )}
+
+      {/* No dot: whether RawBT is installed and paired is not something this
+          page can check, and a green light it cannot verify would be a lie. */}
+      {onAndroid && <span className="text-neutral-600">Prints on this phone</span>}
+
+      {!local && !status && <span className="text-neutral-500">Checking printer…</span>}
+
+      {showOffice && (
+        <span className="flex items-center gap-1.5">
+          <Dot ok={status.printerConnected} />
+          Printer PC:{" "}
+          {status.printerConnected
+            ? `Connected${status.port ? ` (${status.port})` : ""}`
+            : status.agentOnline
+              ? "Not answering"
+              : "Offline"}
+        </span>
+      )}
+
+      {status && status.pendingJobs > 0 && (
         <span className="rounded bg-amber-100 px-2 py-0.5 text-amber-900">
           {status.pendingJobs} waiting
         </span>

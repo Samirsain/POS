@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 /**
  * Printing straight from a laptop over USB.
@@ -33,10 +33,41 @@ export async function pickPrinter(): Promise<USBDevice> {
   return navigator.usb.requestDevice({ filters: [{ classCode: 7 }] });
 }
 
+/**
+ * What Chrome says when Windows owns the device, in words the counter can act
+ * on. "Access denied" out of `open()` and "Unable to claim interface" out of
+ * `claimInterface()` are the same problem wearing two hats: a driver is already
+ * bound to the printer, so the browser is refused the handle.
+ */
+export function usbFailureMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  if (/access denied|unable to claim|no device selected|device unavailable/i.test(raw)) {
+    return (
+      "Windows is holding this printer with its own driver, so the browser cannot reach it. " +
+      "Swap it to WinUSB — see the USB section of the README."
+    );
+  }
+  return raw;
+}
+
+/**
+ * Whether the browser can actually have this printer, which is not the same
+ * question as whether the operator allowed it. Windows decides, and the only
+ * way to ask Windows is to try. Cheap: open and close, no bytes.
+ */
+async function openable(device: USBDevice): Promise<void> {
+  await device.open();
+  await device.close();
+}
+
 export async function printOverUsb(device: USBDevice, payloadBase64: string): Promise<void> {
   const bytes = Uint8Array.from(atob(payloadBase64), (c) => c.charCodeAt(0));
 
-  await device.open();
+  try {
+    await device.open();
+  } catch (e) {
+    throw new Error(usbFailureMessage(e));
+  }
   try {
     // configuration is null until the device is open, so the endpoint can only
     // be found in here.
@@ -44,13 +75,8 @@ export async function printOverUsb(device: USBDevice, payloadBase64: string): Pr
     const { interfaceNumber, endpointNumber } = bulkOut(device);
     try {
       await device.claimInterface(interfaceNumber);
-    } catch {
-      // Far and away the most common failure, and the message Chrome gives
-      // ("Unable to claim interface") tells the counter staff nothing.
-      throw new Error(
-        "Windows is holding this printer with its own driver, so the browser cannot use it. " +
-          "See the USB section of the README, or print on the office printer instead.",
-      );
+    } catch (e) {
+      throw new Error(usbFailureMessage(e));
     }
     const result = await device.transferOut(endpointNumber, bytes);
     if (result.status !== "ok") throw new Error(`The printer rejected the data (${result.status}).`);
@@ -80,35 +106,75 @@ function bulkOut(device: USBDevice) {
  * Chrome hands back a device the operator has already allowed without asking
  * again, and only while it is actually plugged in — so this doubles as the
  * cable's own connected light. Connect once, then Print is just Print.
+ *
+ * Module state rather than per-component state: the form's Connect button and
+ * the header's light have to be the same answer, and granting permission fires
+ * no event that the other one could hear.
  */
-export function useUsbPrinter() {
-  const [device, setDevice] = useState<USBDevice | null>(null);
+type UsbState = { device: USBDevice | null; error: string | null };
 
-  useEffect(() => {
-    if (!hasWebUsb()) return;
+const NOTHING: UsbState = { device: null, error: null };
+let state: UsbState = NOTHING;
+const listeners = new Set<() => void>();
+let watching = false;
+
+function publish(next: UsbState) {
+  state = next;
+  for (const listener of listeners) listener();
+}
+
+/** Green only once Windows has actually handed the device over. */
+async function adopt(candidate: USBDevice) {
+  try {
+    await openable(candidate);
+    publish({ device: candidate, error: null });
+  } catch (e) {
+    publish({ device: null, error: usbFailureMessage(e) });
+  }
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  // Once per page, on the first component to ask. These outlive every
+  // component, which is the point — the cable does too.
+  if (!watching && hasWebUsb()) {
+    watching = true;
     void navigator.usb.getDevices().then(([remembered]) => {
-      if (remembered) setDevice(remembered);
+      if (remembered) void adopt(remembered);
     });
-
     // Someone pulls the cable mid-shift, or plugs it back in. Both change the
     // answer without anybody touching the page.
-    const onConnect = (e: USBConnectionEvent) => setDevice(e.device);
-    const onDisconnect = (e: USBConnectionEvent) =>
-      setDevice((current) => (current === e.device ? null : current));
-    navigator.usb.addEventListener("connect", onConnect);
-    navigator.usb.addEventListener("disconnect", onDisconnect);
-    return () => {
-      navigator.usb.removeEventListener("connect", onConnect);
-      navigator.usb.removeEventListener("disconnect", onDisconnect);
-    };
-  }, []);
+    navigator.usb.addEventListener("connect", (e) => void adopt(e.device));
+    navigator.usb.addEventListener("disconnect", (e) => {
+      if (state.device === e.device) publish(NOTHING);
+    });
+  }
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
-  /** Opens the chooser. Must be called straight from a click. */
+export function useUsbPrinter() {
+  const { device, error } = useSyncExternalStore(
+    subscribe,
+    () => state,
+    () => NOTHING, // The server has no cable.
+  );
+
+  /**
+   * Opens the chooser and proves the device is usable, so a driver Windows will
+   * not let go of is found here — at the cost of a click — rather than after a
+   * receipt number has been spent on it.
+   */
   const connect = useCallback(async () => {
     const picked = await pickPrinter();
-    setDevice(picked);
+    await openable(picked).catch((e: unknown) => {
+      publish({ device: null, error: usbFailureMessage(e) });
+      throw new Error(usbFailureMessage(e));
+    });
+    publish({ device: picked, error: null });
     return picked;
   }, []);
 
-  return { device, connect };
+  return { device, error, connect };
 }

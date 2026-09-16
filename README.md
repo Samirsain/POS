@@ -64,7 +64,7 @@ There are **no user accounts** — anyone with the URL can print. If you want a
 gate, set `ACCESS_CODE` to any string and open `https://<site>/?code=<string>`
 once per device.
 
-### 3. The connector, on the office PC
+### 3. The connector, on the printer PC
 
 The printer must already be paired over Bluetooth (PIN `1234`, MAC
 `DC:0D:30:59:51:A9`) so Windows has given it an outgoing COM port.
@@ -75,8 +75,8 @@ npm install
 npm run build:connector      # from the project root
 ```
 
-That writes `dist/POS Printer Connector/`. Copy the whole folder to the
-office PC, then:
+That writes `dist/POS Printer Connector/`. Copy the whole folder to the PC that
+is paired with the printer — often the same laptop you develop on — then:
 
 1. edit `connector.env` with the two Supabase values
 2. double-click **Start Printer Connector.vbs** — it runs with no window
@@ -115,9 +115,16 @@ the work.
   from Chrome's list — a green dot then says it is connected and every Print
   after that goes straight to paper. Chrome remembers the choice across reloads
   and reboots, and the dot goes out if the cable is pulled. No connector, and it
-  works on any laptop, not just the office one.
-- **On iPhone, or in Firefox and Safari** the office connector is the only route
-  to this printer — see *Known ceilings*.
+  works on any laptop, not just the one running the connector.
+- **Send to the printer PC** is the other button: the receipt is queued and
+  whichever PC is running the connector prints it over Bluetooth. That PC may
+  well be the laptop in front of you — the point of the button is that the
+  printing happens somewhere else, not that the room does. It is the only route
+  on iPhone, in Firefox and Safari — see *Known ceilings*.
+- **The light in the corner is your own device's**, not the connector's: the USB
+  cable on a laptop, nothing to check on a phone. The printer PC appears there
+  only when it is your route, or when jobs are waiting in its queue — it being
+  asleep is not news on a device that prints for itself.
 
 Retrying a `SUCCESS` job is refused by the server, so no retry can ever produce
 a second physical receipt.
@@ -162,8 +169,7 @@ Results go in `docs/printer-verification.md`.
 - **No auto-cut.** `GS V` is not in the self-test, so jobs end with `ESC d 4`
   and the paper is torn by hand.
 - **USB printing needs Chrome or Edge.** WebUSB exists in neither Firefox nor
-  Safari and is not coming, so those browsers get the office connector button
-  only. The page checks for `navigator.usb` rather than sniffing the browser.
+  Safari and is not coming, so those browsers get the printer PC button only. The page checks for `navigator.usb` rather than sniffing the browser.
 - **Windows may hold the USB printer for itself.** If the printer was installed
   with a Windows driver, `usbprint.sys` owns the interface and Chrome cannot
   claim it — the print fails with a message saying so. Either uninstall that
@@ -180,7 +186,7 @@ Results go in `docs/printer-verification.md`.
   reaches Bluetooth Classic only through MFi-certified accessories, and this
   printer is not one; and the iOS 13+ CoreBluetooth exception needs GATT over
   BR/EDR, which this printer does not expose (checked — it advertises SPP and
-  nothing else). iPhones create receipts and the office connector prints them.
+  nothing else). iPhones create receipts and the printer PC prints them.
   A printer with Wi-Fi would remove the connector for every device at once.
 - **Plain `fs` cannot open a COM port on Windows.** `fs.openSync("COM9")`
   creates a *file* named COM9 and reports success, so a receipt lands on disk
