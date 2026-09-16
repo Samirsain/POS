@@ -27,8 +27,10 @@ const bodySchema = z.object({
   /**
    * Who prints it.
    *   agent  - queued for the office connector (the default)
-   *   device - the phone prints it itself over Bluetooth; the bytes come back
-   *            in the response and no job is ever queued for the office
+   *   device - the browser prints it itself — an Android phone over Bluetooth
+   *            through RawBT, a laptop over the USB cable through WebUSB. The
+   *            bytes come back in the response and no job is ever queued for
+   *            the office, so nothing can print a second copy.
    */
   target: z.enum(["agent", "device"]).default("agent"),
   /** Client-generated, one per Print press. Rule 6. */
@@ -126,9 +128,9 @@ export async function POST(request: Request) {
       idempotency_key: input.idempotencyKey,
       payload: payload.toString("base64"),
       target: input.target,
-      // A device job is already done by the time the phone hands the bytes to
-      // RawBT, and it must never sit in the queue where the office connector
-      // would print a second copy.
+      // A device job is already done by the time the browser has the bytes,
+      // and it must never sit in the queue where the office connector would
+      // print a second copy.
       status: input.target === "device" ? "SUCCESS" : "PENDING",
     })
     .select("id")
@@ -145,7 +147,7 @@ export async function POST(request: Request) {
     jobId: job.id,
     receiptNo: receipt.receipt_no,
     bytes: payload.length,
-    // Only the phone gets the bytes; the office connector fetches its own.
+    // Only a device job gets the bytes; the office connector fetches its own.
     payload: input.target === "device" ? payload.toString("base64") : undefined,
   });
 }

@@ -20,8 +20,14 @@ form + live preview  ──POST──▶  Next.js server                 connect
                                               receipts · print_jobs
 ```
 
+**The connector is for receipts printed from somewhere else.** If the printer is
+in front of you, the browser drives it directly and none of the above runs: an
+Android phone hands the bytes to RawBT over Bluetooth, a laptop pushes them down
+the USB cable through WebUSB. The connector is what an iPhone, a Firefox, or
+someone in another building uses.
+
 **The connector pulls, it never listens.** No port forwarding, no firewall change,
-no inbound connection to the office. It also means staff can print from a phone.
+no inbound connection to the office.
 
 **The connector is deliberately dumb.** The server builds the finished bytes; the
 it writes them to a serial port and reports back. It is ~300 lines and
@@ -100,12 +106,18 @@ the work.
   to capitals as you type.
 - **Queue** — every job with its status. `Retry` re-queues a failed job.
   `Reprint` makes a deliberate second copy and is logged as one.
-- **On Android** there is a second button: *Print on this phone*. The phone
-  drives the printer itself over Bluetooth through [RawBT](https://rawbt.ru),
-  so no laptop and no connector need to be running. Pair the printer once in
-  Android's Bluetooth settings; the first print offers the RawBT install.
-- **On iPhone and desktop** the office connector is the only route to this
-  printer — see *Known ceilings*.
+- **On Android** the first button is *Print on this phone*. The phone drives the
+  printer itself over Bluetooth through [RawBT](https://rawbt.ru), so no laptop
+  and no connector need to be running. Pair the printer once in Android's
+  Bluetooth settings; the first print offers the RawBT install.
+- **On a laptop** the first button is *Print on the USB printer*. Plug the
+  printer in with the cable, press *Connect the USB printer* once and pick it
+  from Chrome's list — a green dot then says it is connected and every Print
+  after that goes straight to paper. Chrome remembers the choice across reloads
+  and reboots, and the dot goes out if the cable is pulled. No connector, and it
+  works on any laptop, not just the office one.
+- **On iPhone, or in Firefox and Safari** the office connector is the only route
+  to this printer — see *Known ceilings*.
 
 Retrying a `SUCCESS` job is refused by the server, so no retry can ever produce
 a second physical receipt.
@@ -149,6 +161,21 @@ Results go in `docs/printer-verification.md`.
   the first print with a ruler before trusting it.
 - **No auto-cut.** `GS V` is not in the self-test, so jobs end with `ESC d 4`
   and the paper is torn by hand.
+- **USB printing needs Chrome or Edge.** WebUSB exists in neither Firefox nor
+  Safari and is not coming, so those browsers get the office connector button
+  only. The page checks for `navigator.usb` rather than sniffing the browser.
+- **Windows may hold the USB printer for itself.** If the printer was installed
+  with a Windows driver, `usbprint.sys` owns the interface and Chrome cannot
+  claim it — the print fails with a message saying so. Either uninstall that
+  driver (Device Manager → the printer → *Uninstall device*, tick *delete the
+  driver software*, replug) or bind the interface to WinUSB with
+  [Zadig](https://zadig.akeo.ie). One-time, per PC. Untested here: nobody has
+  yet plugged this printer into a laptop and pressed the button — do that before
+  trusting this paragraph.
+- **A USB failure needs Reprint, not Retry.** The job is written `SUCCESS`
+  before the bytes go out, the same as an Android print, so a failed cable write
+  leaves a saved receipt that never reached paper. The page says so and points
+  at Reprint. Reporting the write back would need a second endpoint.
 - **iPhone cannot drive this printer directly.** Two independent reasons: iOS
   reaches Bluetooth Classic only through MFi-certified accessories, and this
   printer is not one; and the iOS 13+ CoreBluetooth exception needs GATT over

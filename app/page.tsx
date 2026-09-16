@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { isAndroid, sendToRawbt } from "./rawbt";
+import { hasWebUsb, printOverUsb, useUsbPrinter } from "./usb";
 import {
   DEFAULT_HEADER_SIZE,
   FIELD_META,
@@ -40,6 +41,17 @@ export default function NewReceipt() {
     () => isAndroid(),
     () => false,
   );
+  // A laptop with Chrome can drive the printer over USB itself, the same way
+  // the phone drives it over Bluetooth. Not on Android: there the cable would
+  // need OTG and RawBT is already the better route.
+  const onUsb = useSyncExternalStore(
+    () => () => {},
+    () => hasWebUsb() && !isAndroid(),
+    () => false,
+  );
+  // Picked once per browser profile; Chrome remembers the grant across reloads,
+  // and reports the cable coming and going after that.
+  const { device: usbPrinter, connect: connectUsb } = useUsbPrinter();
 
   const today = useMemo(() => new Date(), []);
   // The database allocates the real number; this is what it will be next, so
@@ -61,16 +73,34 @@ export default function NewReceipt() {
     return layout(resolveTemplate(TEMPLATE, DEFAULT_HEADER_SIZE), data, "preview");
   }, [values, nextNo, today]);
 
+  // The button this device can print with on its own, if it has one. It also
+  // decides whether the office connector is the headline or the fallback.
+  const localRoute = onAndroid ? "Print on this phone" : onUsb ? "Print on the USB printer" : null;
+
   const missing = entryFields.filter((f) => !values[f]?.trim());
   const canPrint = missing.length === 0 && Number(values.amount) > 0 && !busy;
 
-  async function print(target: "agent" | "device") {
+  /**
+   *   agent — queued for the office connector
+   *   rawbt — this Android phone prints it over Bluetooth
+   *   usb   — this laptop prints it over the cable
+   * The last two are the same bargain to the server: it hands back the bytes
+   * and never queues a job, so nothing can print a second copy.
+   */
+  async function print(route: "agent" | "rawbt" | "usb") {
     setBusy(true);
     setResult({ kind: "idle" });
+    const target = route === "agent" ? "agent" : "device";
     // One key per press. A double-click reuses it and the server returns the
     // same job instead of printing twice (rule 6).
     const idempotencyKey = crypto.randomUUID();
     try {
+      // Before the POST, not after: the device chooser needs the click's user
+      // gesture, and awaiting a fetch spends it. It also means a cancelled
+      // chooser costs no receipt number. Normally the printer is already
+      // connected and this line does nothing.
+      const device = route === "usb" ? (usbPrinter ?? (await connectUsb())) : null;
+
       const res = await fetch("/api/print", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -84,7 +114,26 @@ export default function NewReceipt() {
         return;
       }
 
-      if (target === "device") {
+      if (route === "usb") {
+        // The write either lands or throws, so unlike RawBT this one knows.
+        try {
+          await printOverUsb(device!, body.payload);
+        } catch (e) {
+          // The receipt exists and the job says SUCCESS, so Retry is refused —
+          // Reprint is the honest route to paper.
+          setResult({
+            kind: "failed",
+            receiptNo: body.receiptNo,
+            message: `${e instanceof Error ? e.message : String(e)} Press Reprint in the Queue once it is fixed.`,
+          });
+          return;
+        }
+        setResult({ kind: "done", receiptNo: body.receiptNo });
+        setValues(Object.fromEntries(entryFields.map((f) => [f, ""])));
+        return;
+      }
+
+      if (route === "rawbt") {
         // The bytes go to RawBT, which owns the Bluetooth connection. Nothing
         // reports back afterwards — the person pressing the button is standing
         // in front of the printer, so they can see it for themselves.
@@ -116,6 +165,8 @@ export default function NewReceipt() {
         });
       }
     } catch (e) {
+      // A cancelled device chooser is a change of mind, not a failure.
+      if (e instanceof DOMException && e.name === "NotFoundError") return;
       setResult({ kind: "failed", receiptNo: null, message: String(e) });
     } finally {
       setBusy(false);
@@ -151,29 +202,39 @@ export default function NewReceipt() {
           })}
 
 
-          {/* On Android the phone can drive the printer itself, so that is the
-              primary button. Everywhere else the office connector is the only
-              route to this printer and there is nothing to choose between. */}
+          {/* Whatever the device in front of you can drive itself is the primary
+              button: the phone over Bluetooth, the laptop over the cable. The
+              office connector is the fallback, and the only route on iPhone. */}
           {onAndroid && (
             <button
               className="mt-2 rounded bg-neutral-900 px-4 py-3 text-base font-semibold text-white disabled:bg-neutral-300"
               disabled={!canPrint}
-              onClick={() => print("device")}
+              onClick={() => print("rawbt")}
             >
               {busy ? "Printing…" : "Print on this phone"}
             </button>
           )}
 
+          {onUsb && (
+            <button
+              className="mt-2 rounded bg-neutral-900 px-4 py-3 text-base font-semibold text-white disabled:bg-neutral-300"
+              disabled={!canPrint}
+              onClick={() => print("usb")}
+            >
+              {busy ? "Printing…" : "Print on the USB printer"}
+            </button>
+          )}
+
           <button
             className={`rounded px-4 py-3 text-base font-semibold disabled:opacity-40 ${
-              onAndroid
+              localRoute
                 ? "border border-neutral-400 bg-white text-neutral-900"
                 : "mt-2 bg-neutral-900 text-white disabled:bg-neutral-300"
             }`}
             disabled={!canPrint}
             onClick={() => print("agent")}
           >
-            {busy ? "Printing…" : onAndroid ? "Print on the office printer" : "Print"}
+            {busy ? "Printing…" : localRoute ? "Print on the office printer" : "Print"}
           </button>
 
           {onAndroid && (
@@ -182,6 +243,30 @@ export default function NewReceipt() {
               app — the first print opens its Play Store page.
             </p>
           )}
+
+          {/* Connect once, then Print is just Print. Pressing Print without
+              connecting still opens the chooser, so this is a shortcut and a
+              connected light, never a step you can be stuck behind. */}
+          {onUsb &&
+            (usbPrinter ? (
+              <p className="flex items-center gap-1.5 text-xs text-neutral-500">
+                <span aria-hidden className="inline-block h-2 w-2 rounded-full bg-green-600" />
+                USB printer connected{usbPrinter.productName ? ` — ${usbPrinter.productName}` : ""}.
+              </p>
+            ) : (
+              <>
+                <button
+                  className="self-start text-sm font-medium text-neutral-900 underline underline-offset-4"
+                  onClick={() => void connectUsb().catch(() => {})}
+                >
+                  Connect the USB printer
+                </button>
+                <p className="text-xs text-neutral-500">
+                  Plug the printer into this computer with the cable, then pick it once. Chrome
+                  remembers it after that.
+                </p>
+              </>
+            ))}
 
           {/* Shown on the phone too. The office connector being down is exactly
               what a phone cannot see, and the phone has a way round it. Nobody
@@ -193,8 +278,8 @@ export default function NewReceipt() {
                 <>
                   The office printer is offline — the office PC is asleep, or the connector is not
                   running on it.{" "}
-                  {onAndroid
-                    ? "Print on this phone still works. Anything sent to the office printer waits until it is back."
+                  {localRoute
+                    ? `${localRoute} still works. Anything sent to the office printer waits until it is back.`
                     : "You can still press Print: the receipt is saved and prints as soon as the connector is back."}
                 </>
               ) : (
@@ -202,8 +287,8 @@ export default function NewReceipt() {
                   The connector is running but the printer is not answering
                   {status.note ? ` — ${status.note}` : ""}. Check it is switched on, has paper, and
                   is plugged in.{" "}
-                  {onAndroid
-                    ? "Print on this phone still works."
+                  {localRoute
+                    ? `${localRoute} still works.`
                     : "Printing now will save the receipt and fail into the Queue, where you can retry it."}
                 </>
               )}
