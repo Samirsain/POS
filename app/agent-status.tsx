@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { isAndroid } from "./rawbt";
-import { hasWebUsb, useUsbPrinter } from "./usb";
 
 export type Status = {
   agentOnline: boolean;
@@ -59,11 +58,10 @@ function Dot({ ok }: { ok: boolean }) {
 /**
  * What the device in front of you can print with.
  *
- * The connector runs on somebody else's machine — which may well be this one,
- * but that is never the point. Reporting it as the status on a laptop that
- * prints over its own cable was two red dots about something that was never
- * going to stop that laptop printing, so it only appears now when it is
- * actually your route, or when jobs are sitting in its queue.
+ * On a phone that prints over Bluetooth itself, a connector in another room
+ * being asleep was two red dots about something that was never going to stop
+ * it printing. So the connector only appears when it is actually your route —
+ * which on any desktop it is — or when jobs are sitting in its queue.
  */
 export default function AgentStatus() {
   const { status } = useStatus();
@@ -73,25 +71,11 @@ export default function AgentStatus() {
     () => isAndroid(),
     () => false,
   );
-  const onUsb = useSyncExternalStore(
-    () => () => {},
-    () => hasWebUsb() && !isAndroid(),
-    () => false,
-  );
-  const { device } = useUsbPrinter();
-
-  const local = onAndroid || onUsb;
+  const local = onAndroid;
   const showOffice = status && (!local || status.pendingJobs > 0);
 
   return (
     <div className="flex items-center gap-4 text-sm">
-      {onUsb && (
-        <span className="flex items-center gap-1.5">
-          <Dot ok={!!device} />
-          USB printer: {device ? "Connected" : "Not connected"}
-        </span>
-      )}
-
       {/* No dot: whether RawBT is installed and paired is not something this
           page can check, and a green light it cannot verify would be a lie. */}
       {onAndroid && <span className="text-neutral-600">Prints on this phone</span>}

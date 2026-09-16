@@ -27,6 +27,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const { SerialPort } = require("serialport");
 
@@ -43,8 +44,14 @@ const CONFIG_TEMPLATE = [
   "SUPABASE_URL=https://<project-ref>.supabase.co",
   "SUPABASE_SERVICE_ROLE_KEY=<service_role key from Supabase, Settings - API>",
   "",
-  "# The printer is found by its Bluetooth MAC, which survives Windows",
-  "# renumbering the COM port. Set PRINTER_PORT only to force a specific port.",
+  "# USB first: if the printer is plugged in and Windows has a driver for it,",
+  "# the bytes go through that. Set PRINTER_NAME to force one queue by name",
+  "# (exactly as it appears in Printers & scanners) if the guess is wrong.",
+  "PRINTER_NAME=",
+  "",
+  "# Bluetooth, used when the cable is not in. The printer is found by its MAC,",
+  "# which survives Windows renumbering the COM port. Set PRINTER_PORT only to",
+  "# force a specific port.",
   "PRINTER_MAC=DC:0D:30:59:51:A9",
   "PRINTER_PORT=",
   "",
@@ -122,6 +129,179 @@ function listAllPorts() {
   } catch (e) {
     return `could not list ports: ${e.message}`;
   }
+}
+
+
+// --- finding the printer on USB --------------------------------------------
+/**
+ * The cable, through Windows rather than around it.
+ *
+ * A browser cannot have a USB thermal printer on Windows: usbprint.sys binds
+ * to any printer-class device and will not release it, so WebUSB gets an
+ * Access denied and the only way round is Zadig, an admin, and a per-laptop
+ * driver swap. But usbprint.sys holding the device is exactly what gives
+ * Windows a print queue for it - and a program on the machine is allowed to
+ * push RAW bytes into that queue, which reach the port untouched by the
+ * driver. So the easy USB path is here, not in the page.
+ *
+ * Two things must both be true before this is used, because a queue will
+ * happily accept a receipt for a printer that is not plugged in and hold it
+ * there forever while we report SUCCESS:
+ *
+ *   1. a device driven by usbprint is physically present, and
+ *   2. a queue exists on a USB port that looks like this printer.
+ */
+function discoverUsbPrinter(forcedName) {
+  const script = [
+    // Win32_PnPEntity lists present devices only, so this is the cable itself.
+    "$present = @(Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |",
+    "  Where-Object { $_.Service -eq 'usbprint' });",
+    // No queue is reported unless the cable is in: the lines below are the
+    // only output, so an empty result means "print over Bluetooth instead".
+    "if ($present.Count -gt 0) {",
+    "  Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue |",
+    "    Where-Object { $_.PortName -like 'USB*' -or $_.PortName -like 'Printer PORT*' } |",
+    "    ForEach-Object { \"$($_.Name)`t$($_.PortName)`t$($_.WorkOffline)\" }",
+    "}",
+    // Joined with spaces, so every statement boundary carries its own
+    // semicolon - PowerShell gets one line and no newlines to rely on.
+  ].join(" ");
+
+  let queues;
+  try {
+    queues = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8",
+      timeout: 20000,
+      windowsHide: true,
+    })
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.split("\t"))
+      .filter((parts) => parts.length === 3 && parts[0])
+      .map(([name, port, offline]) => ({ name, port, offline: /true/i.test(offline) }));
+  } catch (e) {
+    log("usb printer lookup failed:", e.message);
+    return null;
+  }
+
+  if (forcedName) {
+    const forced = queues.find((q) => q.name.toLowerCase() === forcedName.toLowerCase());
+    if (!forced) log(`PRINTER_NAME "${forcedName}" is not a USB printer on this PC`);
+    return forced ? forced.name : null;
+  }
+
+  // A queue Windows has already given up on is not the one we want, and a
+  // printer whose name says nothing about receipts is somebody's laser.
+  const candidates = queues.filter((q) => !q.offline);
+  const thermal = candidates.filter((q) => /pos|58|thermal|receipt/i.test(q.name));
+  if (thermal.length === 1) return thermal[0].name;
+  if (thermal.length === 0 && candidates.length === 1) return candidates[0].name;
+  if (candidates.length > 1) {
+    log(`no obvious receipt printer among ${candidates.map((q) => q.name).join(", ")} - set PRINTER_NAME`);
+  }
+  return null;
+}
+
+/**
+ * RAW to the spooler: StartDocPrinter with datatype "RAW" hands the bytes to
+ * the port without the driver rendering anything, which is what ESC/POS needs.
+ * Node has no binding for winspool, so PowerShell carries the P/Invoke - the
+ * same reason it already carries the COM port lookup.
+ *
+ * The bytes travel as a file rather than on the command line: a receipt with a
+ * heading raster is several KB, and arguments are not.
+ */
+function writeToWindowsPrinter(name, bytes) {
+  const stem = path.join(os.tmpdir(), `pos-receipt-${process.pid}-${Date.now()}`);
+  const dataFile = `${stem}.bin`;
+  const scriptFile = `${stem}.ps1`;
+  fs.writeFileSync(dataFile, bytes);
+  fs.writeFileSync(scriptFile, RAW_PRINT_SCRIPT);
+  try {
+    execFileSync(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptFile, name, dataFile],
+      { encoding: "utf8", timeout: 30000, windowsHide: true },
+    );
+    return bytes.length;
+  } catch (e) {
+    // PowerShell puts the exception on stderr; the exit code alone says nothing.
+    const detail = String(e.stderr || e.stdout || "").trim().split(/\r?\n/)[0];
+    throw new Error(detail || e.message);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+    fs.rmSync(scriptFile, { force: true });
+  }
+}
+
+const RAW_PRINT_SCRIPT = [
+  "param([Parameter(Mandatory=$true)][string]$PrinterName,",
+  "      [Parameter(Mandatory=$true)][string]$DataFile)",
+  "$ErrorActionPreference = 'Stop'",
+  "Add-Type @\"",
+  "using System;",
+  "using System.Runtime.InteropServices;",
+  "public static class RawPrinter {",
+  "  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]",
+  "  public class DOCINFO {",
+  "    [MarshalAs(UnmanagedType.LPWStr)] public string pDocName;",
+  "    [MarshalAs(UnmanagedType.LPWStr)] public string pOutputFile;",
+  "    [MarshalAs(UnmanagedType.LPWStr)] public string pDataType;",
+  "  }",
+  "  [DllImport(\"winspool.drv\", CharSet=CharSet.Unicode, SetLastError=true)]",
+  "  static extern bool OpenPrinter(string src, out IntPtr h, IntPtr pd);",
+  "  [DllImport(\"winspool.drv\", SetLastError=true)] static extern bool ClosePrinter(IntPtr h);",
+  "  [DllImport(\"winspool.drv\", CharSet=CharSet.Unicode, SetLastError=true)]",
+  "  static extern bool StartDocPrinter(IntPtr h, int level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFO di);",
+  "  [DllImport(\"winspool.drv\", SetLastError=true)] static extern bool EndDocPrinter(IntPtr h);",
+  "  [DllImport(\"winspool.drv\", SetLastError=true)] static extern bool StartPagePrinter(IntPtr h);",
+  "  [DllImport(\"winspool.drv\", SetLastError=true)] static extern bool EndPagePrinter(IntPtr h);",
+  "  [DllImport(\"winspool.drv\", SetLastError=true)]",
+  "  static extern bool WritePrinter(IntPtr h, IntPtr bytes, int count, out int written);",
+  "  static void Check(bool ok, string what) {",
+  "    if (!ok) throw new Exception(what + \" failed: Win32 error \" + Marshal.GetLastWin32Error());",
+  "  }",
+  "  public static void Send(string printer, byte[] bytes) {",
+  "    IntPtr h;",
+  "    Check(OpenPrinter(printer, out h, IntPtr.Zero), \"OpenPrinter\");",
+  "    try {",
+  "      DOCINFO di = new DOCINFO();",
+  "      di.pDocName = \"Receipt\";",
+  "      di.pDataType = \"RAW\";",
+  "      Check(StartDocPrinter(h, 1, di), \"StartDocPrinter\");",
+  "      try {",
+  "        Check(StartPagePrinter(h), \"StartPagePrinter\");",
+  "        IntPtr buffer = Marshal.AllocCoTaskMem(bytes.Length);",
+  "        try {",
+  "          Marshal.Copy(bytes, 0, buffer, bytes.Length);",
+  "          int written;",
+  "          Check(WritePrinter(h, buffer, bytes.Length, out written), \"WritePrinter\");",
+  "          if (written != bytes.Length)",
+  "            throw new Exception(\"short write: \" + written + \" of \" + bytes.Length + \" bytes\");",
+  "        } finally { Marshal.FreeCoTaskMem(buffer); }",
+  "        EndPagePrinter(h);",
+  "      } finally { EndDocPrinter(h); }",
+  "    } finally { ClosePrinter(h); }",
+  "  }",
+  "}",
+  "\"@",
+  "[RawPrinter]::Send($PrinterName, [System.IO.File]::ReadAllBytes($DataFile))",
+  "",
+].join("\r\n");
+
+/**
+ * USB if the cable is in, Bluetooth otherwise. Both end as the same bytes on
+ * the same printer; the cable is just faster and needs nothing paired.
+ */
+function writeToTarget(target, bytes) {
+  return target.kind === "usb"
+    ? writeToWindowsPrinter(target.name, bytes)
+    : writeToPort(target.port, bytes);
+}
+
+function describeTarget(target) {
+  if (!target) return null;
+  return target.kind === "usb" ? `${target.name} (USB)` : target.port;
 }
 
 /**
@@ -204,33 +384,50 @@ async function main() {
 
   if (args.includes("--ports")) {
     console.log(listAllPorts());
+    console.log("\nUSB printer Windows would use:", discoverUsbPrinter(null) || "none found");
     return;
   }
 
   const cfg = loadConfig();
   const MAC = (cfg.PRINTER_MAC || "DC:0D:30:59:51:A9").replace(/[^0-9a-f]/gi, "").toUpperCase();
   const FORCED = (cfg.PRINTER_PORT || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const FORCED_NAME = (cfg.PRINTER_NAME || "").trim();
   const POLL_MS = Number(cfg.POLL_MS || 1500);
   const HEARTBEAT_MS = 5000;
 
-  // Cached so the PowerShell lookup does not run on every heartbeat. Cleared
-  // whenever a write fails, which is exactly when the port may have moved.
-  let cachedPort = FORCED[0] || null;
-  const findPort = () => {
-    if (cachedPort) return cachedPort;
-    cachedPort = discoverPort(MAC)[0] || null;
-    return cachedPort;
+  // Cached so the PowerShell lookups do not run on every heartbeat. Cleared
+  // whenever a write fails, which is exactly when the printer may have moved
+  // from one transport to the other - somebody pulling the cable is the
+  // ordinary case, not an exception.
+  let cachedTarget = FORCED[0] ? { kind: "serial", port: FORCED[0] } : null;
+  const findTarget = () => {
+    if (cachedTarget) return cachedTarget;
+    // USB first: it is faster, it needs nothing paired, and if the cable is in
+    // then somebody plugged it in on purpose.
+    const usb = discoverUsbPrinter(FORCED_NAME || null);
+    if (usb) {
+      cachedTarget = { kind: "usb", name: usb };
+      return cachedTarget;
+    }
+    const port = discoverPort(MAC)[0] || null;
+    cachedTarget = port ? { kind: "serial", port } : null;
+    return cachedTarget;
+  };
+  const forgetTarget = () => {
+    cachedTarget = FORCED[0] ? { kind: "serial", port: FORCED[0] } : null;
   };
 
   if (args.includes("--test")) {
-    const port = findPort();
-    if (!port) {
-      console.error(`Printer ${MAC} not found. Pair it over Bluetooth, or set PRINTER_PORT.`);
+    const target = findTarget();
+    if (!target) {
+      console.error(
+        `No printer found. Plug it in over USB, or pair it over Bluetooth (${MAC}), or set PRINTER_NAME / PRINTER_PORT.`,
+      );
       process.exit(1);
     }
     const ESC = 0x1b;
-    await writeToPort(
-      port,
+    await writeToTarget(
+      target,
       Buffer.concat([
         Buffer.from([ESC, 0x40]),
         Buffer.from([ESC, 0x61, 0x01]),
@@ -239,7 +436,7 @@ async function main() {
         Buffer.from([ESC, 0x64, 0x04]),
       ]),
     );
-    console.log(`Test slip sent to ${port}.`);
+    console.log(`Test slip sent to ${describeTarget(target)}.`);
     return;
   }
 
@@ -252,12 +449,12 @@ async function main() {
   let lastError = null;
 
   async function heartbeat() {
-    const port = findPort();
+    const target = findTarget();
     await api.heartbeat({
       id: "only",
       last_seen: new Date().toISOString(),
-      printer_connected: Boolean(port),
-      port,
+      printer_connected: Boolean(target),
+      port: describeTarget(target),
       note: lastError,
     });
   }
@@ -273,17 +470,19 @@ async function main() {
     log(`job ${short} claimed, attempt ${job.attempts}, ${bytes.length} bytes`);
 
     try {
-      const port = findPort();
-      if (!port) throw new Error(`printer ${MAC} is not paired or is out of range`);
+      const target = findTarget();
+      if (!target) {
+        throw new Error(`printer is neither plugged in over USB nor paired over Bluetooth (${MAC})`);
+      }
       const started = Date.now();
-      await writeToPort(port, bytes);
+      await writeToTarget(target, bytes);
       lastError = null;
       await api.finishJob(job.id, "SUCCESS", null);
-      log(`job ${short} printed via ${port} in ${Date.now() - started}ms`);
+      log(`job ${short} printed via ${describeTarget(target)} in ${Date.now() - started}ms`);
     } catch (e) {
       const message = String(e && e.message ? e.message : e);
       lastError = message;
-      cachedPort = FORCED[0] || null; // the port may have moved; look again
+      forgetTarget(); // the cable may have come out; look again next time
       // Stays FAILED, never silently retried: a receipt that may have half
       // printed is a human decision, not an automatic second attempt.
       await api.finishJob(job.id, "FAILED", message).catch(() => {});
@@ -293,7 +492,7 @@ async function main() {
   }
 
   log(`connector starting, printer ${MAC}, polling every ${POLL_MS}ms`);
-  log(`printer port: ${findPort() || "NOT FOUND - pair the printer or set PRINTER_PORT"}`);
+  log(`printer: ${describeTarget(findTarget()) || "NOT FOUND - plug in the USB cable or pair over Bluetooth"}`);
   log(`log file: ${LOG_FILE}`);
 
   await heartbeat().catch((e) => log("heartbeat failed:", e.message));

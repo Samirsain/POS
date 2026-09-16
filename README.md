@@ -20,11 +20,11 @@ form + live preview  ──POST──▶  Next.js server                 connect
                                               receipts · print_jobs
 ```
 
-**The connector is for receipts printed from somewhere else.** If the printer is
-in front of you, the browser drives it directly and none of the above runs: an
-Android phone hands the bytes to RawBT over Bluetooth, a laptop pushes them down
-the USB cable through WebUSB. The connector is what an iPhone, a Firefox, or
-someone in another building uses.
+**An Android phone skips all of it.** The bytes come back in the response and
+RawBT drives the printer over Bluetooth, so no PC has to be awake. Every other
+device — laptop, iPhone, anything — goes through the connector, because no
+desktop browser can reach a USB thermal printer on Windows. See *Known
+ceilings*.
 
 **The connector pulls, it never listens.** No port forwarding, no firewall change,
 no inbound connection to the office.
@@ -66,8 +66,14 @@ once per device.
 
 ### 3. The connector, on the printer PC
 
-The printer must already be paired over Bluetooth (PIN `1234`, MAC
-`DC:0D:30:59:51:A9`) so Windows has given it an outgoing COM port.
+The printer needs to be reachable one of two ways, and the connector prefers
+the first:
+
+- **USB** — plug it in and install its Windows driver the normal way (the
+  vendor's installer). That is all: the connector finds the queue itself and
+  pushes RAW ESC/POS into it. Verified here as `POS-58-Series (1)`.
+- **Bluetooth** — pair it (PIN `1234`, MAC `DC:0D:30:59:51:A9`) so Windows
+  gives it an outgoing COM port. Used when the cable is not in.
 
 ```
 cd connector
@@ -110,21 +116,19 @@ the work.
   printer itself over Bluetooth through [RawBT](https://rawbt.ru), so no laptop
   and no connector need to be running. Pair the printer once in Android's
   Bluetooth settings; the first print offers the RawBT install.
-- **On a laptop** the first button is *Print on the USB printer*. Plug the
-  printer in with the cable, press *Connect the USB printer* once and pick it
-  from Chrome's list — a green dot then says it is connected and every Print
-  after that goes straight to paper. Chrome remembers the choice across reloads
-  and reboots, and the dot goes out if the cable is pulled. No connector, and it
-  works on any laptop, not just the one running the connector.
+- **On a laptop** there is one button, *Print*, and it goes to the connector.
+  Plug the printer into that PC with the USB cable and it prints over the
+  cable; unplug it and the same button prints over Bluetooth instead, with
+  nothing to change.
 - **Send to the printer PC** is the other button: the receipt is queued and
   whichever PC is running the connector prints it over Bluetooth. That PC may
   well be the laptop in front of you — the point of the button is that the
   printing happens somewhere else, not that the room does. It is the only route
   on iPhone, in Firefox and Safari — see *Known ceilings*.
-- **The light in the corner is your own device's**, not the connector's: the USB
-  cable on a laptop, nothing to check on a phone. The printer PC appears there
-  only when it is your route, or when jobs are waiting in its queue — it being
-  asleep is not news on a device that prints for itself.
+- **The light in the corner** says *Printer PC* and names the route it found —
+  `POS-58-Series (1) (USB)` or `COM9`. On an Android phone it disappears unless
+  jobs are waiting, because a PC being asleep is not news to a phone that
+  prints for itself.
 
 Retrying a `SUCCESS` job is refused by the server, so no retry can ever produce
 a second physical receipt.
@@ -168,20 +172,24 @@ Results go in `docs/printer-verification.md`.
   the first print with a ruler before trusting it.
 - **No auto-cut.** `GS V` is not in the self-test, so jobs end with `ESC d 4`
   and the paper is torn by hand.
-- **USB printing needs Chrome or Edge.** WebUSB exists in neither Firefox nor
-  Safari and is not coming, so those browsers get the printer PC button only. The page checks for `navigator.usb` rather than sniffing the browser.
-- **Windows may hold the USB printer for itself.** If the printer was installed
-  with a Windows driver, `usbprint.sys` owns the interface and Chrome cannot
-  claim it — the print fails with a message saying so. Either uninstall that
-  driver (Device Manager → the printer → *Uninstall device*, tick *delete the
-  driver software*, replug) or bind the interface to WinUSB with
-  [Zadig](https://zadig.akeo.ie). One-time, per PC. Untested here: nobody has
-  yet plugged this printer into a laptop and pressed the button — do that before
-  trusting this paragraph.
-- **A USB failure needs Reprint, not Retry.** The job is written `SUCCESS`
-  before the bytes go out, the same as an Android print, so a failed cable write
-  leaves a saved receipt that never reached paper. The page says so and points
-  at Reprint. Reporting the write back would need a second endpoint.
+- **No desktop browser can reach this printer directly, and WebUSB was tried.**
+  `usbprint.sys` binds itself to any USB printer-class device and will not
+  release it, so Chrome is refused the handle — measured here, where the
+  printer comes up as `USB\VID_0456&PID_0808\PRINTER` owned by *USB Printing
+  Support* and returns Access denied out of `open()`. The way round would be
+  [Zadig](https://zadig.akeo.ie) and WinUSB: an admin, the loss of the Windows
+  print queue for that cable, and the same surgery on every laptop. Going
+  through the queue instead costs one connector install and no driver changes,
+  so that is what the connector does.
+- **RAW to a queue means the spooler took it, not that paper came out.** If the
+  printer is off or unplugged the job would sit in the queue while the
+  connector reported `SUCCESS`, so the USB route is used only when a device
+  driven by `usbprint` is actually present. That check is the honest part; the
+  spooler's acceptance is not.
+- **The USB queue is picked by name.** A queue on a USB port whose name matches
+  `pos|58|thermal|receipt` wins, or the only candidate if there is just one.
+  Anything else logs what it saw and falls back to Bluetooth — set
+  `PRINTER_NAME` in `connector.env` to settle it.
 - **iPhone cannot drive this printer directly.** Two independent reasons: iOS
   reaches Bluetooth Classic only through MFi-certified accessories, and this
   printer is not one; and the iOS 13+ CoreBluetooth exception needs GATT over
