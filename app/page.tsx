@@ -124,7 +124,7 @@ export default function NewReceipt() {
         setResult({
           kind: "failed",
           receiptNo: body.receiptNo,
-          message: outcome.error ?? "The printer did not confirm. Check the Queue.",
+          message: outcome.error ?? "The printer did not confirm.",
         });
       }
     } catch (e) {
@@ -147,14 +147,21 @@ export default function NewReceipt() {
                 <span className="text-sm font-medium text-neutral-700">{meta.label}</span>
                 <input
                   className="rounded border border-neutral-300 bg-white px-3 py-2 text-base outline-none focus:border-neutral-900"
-                  value={values[field] ?? ""}
+                  value={meta.input === "money" ? withCommas(values[field] ?? "") : (values[field] ?? "")}
                   placeholder={meta.placeholder}
                   inputMode={meta.input === "money" ? "decimal" : undefined}
                   autoComplete="off"
                   onChange={(e) =>
                     setValues((v) => ({
                       ...v,
-                      [field]: meta.uppercase ? e.target.value.toUpperCase() : e.target.value,
+                      // Money is stored bare ("10000") and only shown with commas,
+                      // so the preview and the server never see them.
+                      [field]:
+                        meta.input === "money"
+                          ? withCommas(e.target.value.replace(/[^\d.]/g, "")).replace(/,/g, "")
+                          : meta.uppercase
+                            ? e.target.value.toUpperCase()
+                            : e.target.value,
                     }))
                   }
                 />
@@ -218,7 +225,7 @@ export default function NewReceipt() {
                   is plugged in.{" "}
                   {localRoute
                     ? `${localRoute} still works.`
-                    : "Printing now will save the receipt and fail into the Queue, where you can retry it."}
+                    : "Printing now will fail — fix the printer first."}
                 </>
               )}
             </p>
@@ -232,7 +239,7 @@ export default function NewReceipt() {
           {result.kind === "queued" && (
             <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
               Receipt no. {result.receiptNo} saved and waiting. It prints as soon as the printer
-              PC is back — see Queue.
+              PC is back.
             </p>
           )}
           {result.kind === "printing" && (
@@ -257,18 +264,23 @@ export default function NewReceipt() {
   );
 }
 
-/** Poll until the agent reports back, or give up and send them to the Queue. */
+/** "1000000.5" → "10,00,000.5", Indian grouping like the printed receipt. */
+// ponytail: caret jumps to the end when a comma appears mid-edit; track selection if that bites.
+function withCommas(raw: string) {
+  const [int, ...rest] = raw.split(".");
+  const grouped = int ? BigInt(int).toLocaleString("en-IN") : "";
+  return rest.length ? `${grouped}.${rest.join("")}` : grouped;
+}
+
+/** Poll until the agent reports back, or give up. */
 async function waitForJob(jobId: string, timeoutMs = 45_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1200));
-    const res = await fetch("/api/jobs", { cache: "no-store" });
+    const res = await fetch(`/api/jobs?id=${jobId}`, { cache: "no-store" });
     if (!res.ok) continue;
-    const { jobs } = (await res.json()) as {
-      jobs: { id: string; status: string; error: string | null }[];
-    };
-    const job = jobs.find((j) => j.id === jobId);
-    if (job && job.status !== "PENDING" && job.status !== "PRINTING") return job;
+    const job = (await res.json()) as { status: string; error: string | null };
+    if (job.status !== "PENDING" && job.status !== "PRINTING") return job;
   }
-  return { status: "TIMEOUT", error: "No response from the printer yet. Check the Queue." };
+  return { status: "TIMEOUT", error: "No response from the printer yet. Check it has paper and is switched on." };
 }

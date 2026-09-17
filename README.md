@@ -139,9 +139,9 @@ the work.
 - **New Receipt** — four fields, live preview, Print. The receipt number is
   allocated by the database (six digits: `000001`, `000002`, …), so two people
   printing at the same moment cannot collide. Project, plot and name are forced
-  to capitals as you type.
-- **Queue** — every job with its status. `Retry` re-queues a failed job.
-  `Reprint` makes a deliberate second copy and is logged as one.
+  to capitals as you type, and the amount gets commas (`10,000`).
+- **No history page.** Receipts are sensitive, so there is no screen or API
+  that lists past receipts.
 - **On Android** the first button is *Print on this phone*. The phone drives the
   printer itself over Bluetooth through [RawBT](https://rawbt.ru), so no laptop
   and no connector need to be running. Pair the printer once in Android's
