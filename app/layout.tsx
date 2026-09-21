@@ -16,7 +16,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav className="flex gap-1 text-sm font-medium">
             <Link className="rounded px-3 py-1.5 hover:bg-neutral-100" href="/">
               New Receipt
-            </Link>          </nav>
+            </Link>
+            <Link className="rounded px-3 py-1.5 hover:bg-neutral-100" href="/blank">
+              Blank Page
+            </Link>
+          </nav>
           <div className="ml-auto">
             <AgentStatus />
           </div>

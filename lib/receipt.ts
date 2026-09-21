@@ -608,3 +608,12 @@ function resolveFill(lines: LayoutLine[], heightMm: number): LayoutLine[] {
   const spare = Math.max(0, heightMm * DOTS_PER_MM - layoutHeightDots(lines));
   return lines.map((l, i) => (i === fillIndex ? { ...l, dots: spare } : l));
 }
+
+/**
+ * Free text for /blank: each line printed as typed, left-aligned, Font A. No
+ * template around it and no fixed height; long lines wrap like everything else.
+ */
+export function blankLayout(text: string, target: Target): LayoutLine[] {
+  const sections = text.replace(/\r/g, "").split("\n").map((content) => ({ type: "text", content }));
+  return layout(templateSchema.parse({ id: "blank", name: "Blank", paperWidth: 58, sections }), {}, target);
+}

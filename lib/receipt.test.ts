@@ -24,6 +24,7 @@ import {
   SIZE_SCALE,
   layoutHeightDots,
   DOTS_PER_MM,
+  blankLayout,
 } from "./receipt";
 import { ASSET_SIZE } from "./asset-sizes";
 import { ASSET_BITMAP } from "./asset-bitmaps";
@@ -463,4 +464,11 @@ test("amount in words wraps naturally, never stretched or cut", () => {
   const printed = lines.filter((l) => words.includes(l.text.trim()) && l.text.trim()).map((l) => l.text.trim());
   assert.equal(printed.join(" "), words);
   for (const l of lines) assert.ok(l.text.length <= colsAt(32, l.size), `"${l.text}" overflows`);
+});
+
+test("blankLayout prints each line as typed, wrapping long ones", () => {
+  const lines = blankLayout("hello\n\n" + "x".repeat(40), "print");
+  const texts = lines.map((l) => (l.kind === "text" ? l.text : null));
+  assert.deepEqual(texts, ["hello", "", "x".repeat(32), "x".repeat(8)]);
+  assert.ok(encode(lines).length > 0);
 });
