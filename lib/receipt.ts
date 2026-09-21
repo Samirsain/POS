@@ -610,10 +610,34 @@ function resolveFill(lines: LayoutLine[], heightMm: number): LayoutLine[] {
 }
 
 /**
- * Free text for /blank: each line printed as typed, left-aligned, Font A. No
- * template around it and no fixed height; long lines wrap like everything else.
+ * Free text for /blank, on the same 58 x 80mm page as a receipt. Each line
+ * prints as typed, centred and bold, at the biggest size where no word has to
+ * be split and the whole text still fits the page. Text too long even at normal
+ * size makes the page taller rather than losing a line (§5.2).
  */
 export function blankLayout(text: string, target: Target): LayoutLine[] {
-  const sections = text.replace(/\r/g, "").split("\n").map((content) => ({ type: "text", content }));
-  return layout(templateSchema.parse({ id: "blank", name: "Blank", paperWidth: 58, sections }), {}, target);
+  const rows = text.replace(/\r/g, "").split("\n");
+  const longestWord = Math.max(0, ...rows.flatMap((r) => r.split(/\s+/)).map((w) => w.length));
+  const pageAt = (size: TextSize) =>
+    layout(
+      templateSchema.parse({
+        id: "blank",
+        name: "Blank",
+        paperWidth: 58,
+        sections: [
+          { type: "gap", mm: 2 },
+          ...rows.map((content) => ({ type: "text", content, align: "center", bold: true, size })),
+          { type: "fill" },
+        ],
+      }),
+      {},
+      target,
+    );
+  const fits = (size: TextSize) =>
+    longestWord <= colsAt(FONT_COLS[DEFAULT_FONT], size) &&
+    layoutHeightDots(pageAt(size)) <= BLANK_HEIGHT_MM * DOTS_PER_MM;
+  return pageAt((["xlarge", "large"] as const).find(fits) ?? "normal");
 }
+
+/** The receipt's own height; /blank prints on the same size of page. */
+export const BLANK_HEIGHT_MM = 80;

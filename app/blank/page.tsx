@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
-import { blankLayout } from "@/lib/receipt";
+import { BLANK_HEIGHT_MM, DOTS_PER_MM, blankLayout, layoutHeightDots } from "@/lib/receipt";
 import { isAndroid, sendToRawbt } from "../rawbt";
 import { waitForJob } from "../wait-for-job";
 import Preview from "../preview";
@@ -55,6 +55,7 @@ export default function BlankPage() {
   }
 
   const empty = !text.trim();
+  const overflows = layoutHeightDots(lines) > BLANK_HEIGHT_MM * DOTS_PER_MM;
 
   return (
     <div className="mx-auto grid max-w-5xl gap-8 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -64,7 +65,7 @@ export default function BlankPage() {
           className="min-h-64 rounded border border-neutral-300 bg-white px-3 py-2 font-mono text-base outline-none focus:border-neutral-900"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Type anything. Each line prints as it is."
+          placeholder="Type anything. It prints as big as fits on the receipt."
           autoFocus
         />
         {onAndroid && (
@@ -85,6 +86,12 @@ export default function BlankPage() {
         >
           {busy ? "Printing…" : onAndroid ? "Send to the printer PC" : "Print"}
         </button>
+        {overflows && (
+          <p className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Too much text for one {BLANK_HEIGHT_MM}mm page even at the smallest size. It still
+            prints in full, just on a longer piece of paper.
+          </p>
+        )}
         {result.kind === "done" && <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-900">Printed.</p>}
         {result.kind === "printing" && (
           <p className="rounded bg-neutral-200 px-3 py-2 text-sm">Queued, waiting for the printer…</p>

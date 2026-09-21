@@ -41,7 +41,9 @@ const glyphFor = (assetId: string) =>
 export default function Preview({ lines }: { lines: LayoutLine[] }) {
   return (
     <div className="inline-block bg-white px-3 shadow-[0_1px_4px_rgba(0,0,0,0.15)]">
-      <div className="font-mono text-[13px] whitespace-pre">
+      {/* Always the full 32 columns of paper, so a short line does not make
+          the page look narrower than it prints. */}
+      <div className="w-[32ch] font-mono text-[13px] whitespace-pre">
         {lines.map((line, i) => {
           if (line.kind === "image") {
             const glyph = glyphFor(line.assetId);

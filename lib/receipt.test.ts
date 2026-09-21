@@ -466,9 +466,23 @@ test("amount in words wraps naturally, never stretched or cut", () => {
   for (const l of lines) assert.ok(l.text.length <= colsAt(32, l.size), `"${l.text}" overflows`);
 });
 
-test("blankLayout prints each line as typed, wrapping long ones", () => {
-  const lines = blankLayout("hello\n\n" + "x".repeat(40), "print");
-  const texts = lines.map((l) => (l.kind === "text" ? l.text : null));
-  assert.deepEqual(texts, ["hello", "", "x".repeat(32), "x".repeat(8)]);
-  assert.ok(encode(lines).length > 0);
+const textOf = (lines: ReturnType<typeof blankLayout>) =>
+  lines.flatMap((l) => (l.kind === "text" ? [`${l.size}:${l.text}`] : []));
+
+test("blankLayout uses the biggest size that fits, on an 80mm page", () => {
+  assert.deepEqual(textOf(blankLayout("HELLO", "print")), ["xlarge:HELLO"]);
+  // 15 letters cannot sit on a 10-column 3x line without splitting the word.
+  assert.deepEqual(textOf(blankLayout("CONGRATULATIONS", "print")), ["large:CONGRATULATIONS"]);
+  // Too many lines for 3x or 2x on 80mm steps down to normal.
+  assert.equal(textOf(blankLayout(Array(12).fill("A").join("\n"), "print"))[0], "normal:A");
+  for (const text of ["HELLO", "CONGRATULATIONS", "a\nb\nc"]) {
+    assert.equal(layoutHeightDots(blankLayout(text, "print")), 80 * DOTS_PER_MM, text);
+  }
+  assert.ok(encode(blankLayout("HELLO", "print")).length > 0);
+});
+
+test("blankLayout never drops text that overruns the page", () => {
+  const long = Array(40).fill("LINE").join("\n");
+  assert.equal(textOf(blankLayout(long, "print")).length, 40);
+  assert.ok(layoutHeightDots(blankLayout(long, "print")) > 80 * DOTS_PER_MM);
 });
