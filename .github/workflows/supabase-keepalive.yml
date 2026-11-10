@@ -1,0 +1,16 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # Runs every 3 days at 06:00 UTC so the project never pauses
+    - cron: '0 6 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          curl -i -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" "https://kkzpfmjtrzpwmtvkdkfj.supabase.co/rest/v1/agent_status?select=id" || true
+

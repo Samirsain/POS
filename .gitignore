@@ -56,3 +56,4 @@ om.md
 connector/connector.env
 connector/*.log
 dist/
+data/

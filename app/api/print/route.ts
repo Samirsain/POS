@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/supabase";
+import { localDb } from "@/lib/local-db";
+import { printDirectToWindowsPrinter } from "@/lib/windows-printer";
 import {
   DEFAULT_HEADER_SIZE,
   DEFAULT_TEMPLATE_ID,
@@ -143,6 +145,16 @@ export async function POST(request: Request) {
       { error: jobError?.message ?? "Could not queue the print job" },
       { status: 500 },
     );
+  }
+
+  // When running locally, print directly to the USB thermal printer
+  if (process.env.USE_LOCAL_DB === "true" && input.target === "agent") {
+    try {
+      printDirectToWindowsPrinter("POS-58-Series (1)", payload);
+      localDb.finishPrintJob(job.id, "SUCCESS");
+    } catch (printErr) {
+      console.error("Direct print failed, left in queue:", printErr);
+    }
   }
 
   return NextResponse.json({

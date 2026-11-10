@@ -24,18 +24,19 @@ export async function GET() {
   ]);
 
   const lastSeen = status?.last_seen ? new Date(status.last_seen) : null;
-  const agentOnline = lastSeen !== null && Date.now() - lastSeen.getTime() < OFFLINE_AFTER_MS;
+  const isLocal = process.env.USE_LOCAL_DB === "true";
+  const agentOnline = isLocal ? true : lastSeen !== null && Date.now() - lastSeen.getTime() < OFFLINE_AFTER_MS;
 
   // A stale heartbeat tells us nothing about the printer, so it is not connected
   // as far as anyone here knows.
-  const printerConnected = agentOnline && (status?.printer_connected ?? false);
+  const printerConnected = isLocal ? true : agentOnline && (status?.printer_connected ?? false);
 
   const lastNo = Number(lastReceipt?.receipt_no ?? 0);
   return NextResponse.json({
     agentOnline,
     printerConnected,
-    port: agentOnline ? (status?.port ?? null) : null,
-    note: agentOnline ? (status?.note ?? null) : (status?.note ?? null),
+    port: isLocal ? (status?.port ?? "POS-58-Series (1) (USB)") : agentOnline ? (status?.port ?? null) : null,
+    note: isLocal ? null : agentOnline ? (status?.note ?? null) : (status?.note ?? null),
     lastSeen: status?.last_seen ?? null,
     pendingJobs: pending ?? 0,
     // Preview-only. The real number is allocated by the DB sequence at insert.
