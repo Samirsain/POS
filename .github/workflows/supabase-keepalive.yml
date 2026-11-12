@@ -2,12 +2,13 @@ name: Supabase Keep-Alive
 
 # A free Supabase project pauses after 7 days with no database activity. The
 # connector's heartbeat keeps it awake while the office PC is on; this keeps it
-# awake when nobody has used the system for weeks.
+# awake when nobody has used the system for weeks, and wakes it up again if it
+# got paused anyway.
 on:
   schedule:
-    # Daily, off the hour: GitHub delays or drops :00 runs under load, and one
-    # missed day still leaves six days of margin.
-    - cron: '23 3 * * *'
+    # Every 6 hours, off the hour: GitHub delays or drops :00 runs under load.
+    # If the project ever does get paused, it is back within ~6 hours.
+    - cron: '23 */6 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,23 +17,52 @@ permissions:
 jobs:
   keepalive:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      REF: kkzpfmjtrzpwmtvkdkfj
     steps:
-      # A real query, not just a hit on the gateway: a request without a valid
-      # key is rejected before it reaches Postgres and does not count. Fails the
-      # run (and GitHub emails you) if the key is missing or the project is down.
+      # Layer 2: if the project is paused (missed runs, GitHub outage, anything),
+      # restore it and wait until it is up. Needs a Supabase personal access
+      # token, since a paused project's own API keys answer nothing.
+      - name: Restore the project if it is paused
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "::error::Repository secret SUPABASE_ACCESS_TOKEN is not set"; exit 1; }
+          api() { curl -sS --fail-with-body --retry 3 --retry-all-errors -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" "$@"; }
+          status() { api "https://api.supabase.com/v1/projects/$REF" | jq -r .status; }
+          s=$(status); echo "project status: $s"
+          if [ "$s" = "INACTIVE" ]; then
+            echo "::warning::Supabase project was paused - restoring it"
+            api -X POST -H "Content-Type: application/json" -d '{}' "https://api.supabase.com/v1/projects/$REF/restore"
+          fi
+          # Wait out a restore (ours or one already running) so the read below
+          # hits a live database.
+          for i in $(seq 1 45); do
+            [ "$s" = "ACTIVE_HEALTHY" ] && exit 0
+            echo "waiting, status $s"; sleep 20; s=$(status)
+          done
+          echo "::error::Project still $s after 15 minutes"; exit 1
+
+      # Layer 1: a real query, not just a hit on the gateway: a request without
+      # a valid key is rejected before it reaches Postgres and does not count.
+      # Runs even if the step above failed, so a missing token never stops the
+      # keep-alive. Any failure fails the run, and GitHub emails you.
       - name: Read from the database
+        if: ${{ !cancelled() }}
         env:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           test -n "$SUPABASE_KEY" || { echo "::error::Repository secret SUPABASE_KEY is not set"; exit 1; }
           curl -sS --fail-with-body --retry 3 --retry-delay 30 --retry-all-errors \
             -H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer $SUPABASE_KEY" \
-            "https://kkzpfmjtrzpwmtvkdkfj.supabase.co/rest/v1/agent_status?select=last_seen"
+            "https://$REF.supabase.co/rest/v1/agent_status?select=last_seen"
 
       # GitHub switches off scheduled workflows in a public repo after 60 days
       # without a commit, which would quietly end the keep-alive. Re-enabling it
       # through the API resets that clock (the same trick keepalive-workflow uses).
       - name: Stop GitHub disabling this schedule
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/supabase-keepalive.yml/enable"
