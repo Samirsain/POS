@@ -139,21 +139,19 @@ function createLocalClient() {
   };
 }
 
+/**
+ * Server-only Supabase client. The service-role key bypasses RLS, so it must
+ * never reach the browser. The JSON-file store is opt-in only (USE_LOCAL_DB=true):
+ * falling back to it silently on Vercel would keep receipts in memory, lose them,
+ * and hand out receipt numbers that already exist in Supabase.
+ */
 export function db(): any {
-  const isLocal =
-    process.env.USE_LOCAL_DB === "true" ||
-    !process.env.SUPABASE_URL ||
-    process.env.SUPABASE_URL.includes("localhost") ||
-    process.env.SUPABASE_URL.includes("127.0.0.1");
-
-  if (isLocal) {
-    return createLocalClient();
-  }
+  if (process.env.USE_LOCAL_DB === "true") return createLocalClient();
 
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    return createLocalClient();
+    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set (or USE_LOCAL_DB=true). See .env.example.");
   }
   return createClient(url, key, { auth: { persistSession: false } });
 }

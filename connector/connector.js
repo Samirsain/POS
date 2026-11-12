@@ -409,6 +409,9 @@ function makeApi(url, key) {
       method,
       headers: { ...headers, ...extraHeaders },
       body: body === undefined ? undefined : JSON.stringify(body),
+      // A connection that stalls (Wi-Fi drop, PC waking from sleep) would
+      // otherwise hold the job loop for minutes while heartbeats say "online".
+      signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) {
       throw new Error(`${method} ${pathAndQuery} -> ${res.status} ${(await res.text()).slice(0, 200)}`);

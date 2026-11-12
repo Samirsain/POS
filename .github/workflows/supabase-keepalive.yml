@@ -1,16 +1,38 @@
 name: Supabase Keep-Alive
 
+# A free Supabase project pauses after 7 days with no database activity. The
+# connector's heartbeat keeps it awake while the office PC is on; this keeps it
+# awake when nobody has used the system for weeks.
 on:
   schedule:
-    # Runs every 3 days at 06:00 UTC so the project never pauses
-    - cron: '0 6 */3 * *'
+    # Daily, off the hour: GitHub delays or drops :00 runs under load, and one
+    # missed day still leaves six days of margin.
+    - cron: '23 3 * * *'
   workflow_dispatch:
+
+permissions:
+  actions: write # for the re-enable step below
 
 jobs:
   keepalive:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST API
+      # A real query, not just a hit on the gateway: a request without a valid
+      # key is rejected before it reaches Postgres and does not count. Fails the
+      # run (and GitHub emails you) if the key is missing or the project is down.
+      - name: Read from the database
+        env:
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          curl -i -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" "https://kkzpfmjtrzpwmtvkdkfj.supabase.co/rest/v1/agent_status?select=id" || true
+          test -n "$SUPABASE_KEY" || { echo "::error::Repository secret SUPABASE_KEY is not set"; exit 1; }
+          curl -sS --fail-with-body --retry 3 --retry-delay 30 --retry-all-errors \
+            -H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer $SUPABASE_KEY" \
+            "https://kkzpfmjtrzpwmtvkdkfj.supabase.co/rest/v1/agent_status?select=last_seen"
 
+      # GitHub switches off scheduled workflows in a public repo after 60 days
+      # without a commit, which would quietly end the keep-alive. Re-enabling it
+      # through the API resets that clock (the same trick keepalive-workflow uses).
+      - name: Stop GitHub disabling this schedule
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/supabase-keepalive.yml/enable"
